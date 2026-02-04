@@ -208,6 +208,19 @@ export function GuestPage() {
   }, [])
 
   useEffect(() => {
+    const pending = getPendingPrize()
+    if (!pending) return
+    const guest = checkedGuest ?? lastRegisteredGuest
+    if (!guest) return
+    const name = 'name' in guest ? guest.name : undefined
+    const phone = 'phone' in guest ? guest.phone : undefined
+    const id = lastRegisteredGuest?.id ?? (checkedGuest?.idLastDigits ? `آخر 4 أرقام: ${checkedGuest.idLastDigits}` : undefined)
+    if (name ?? phone ?? id) {
+      setPendingPrize({ ...pending, name: name ?? pending.name, phone: phone ?? pending.phone, id: id ?? pending.id })
+    }
+  }, [checkedGuest, lastRegisteredGuest])
+
+  useEffect(() => {
     if (typeof navigator === 'undefined') return
     const flush = () => { if (navigator.onLine) void flushPendingExports() }
     const onVisible = () => { if (document.visibilityState === 'visible') flush() }
@@ -224,7 +237,7 @@ export function GuestPage() {
     const pending = getPendingPrize()
     if (!pending) return
     const settings = getSettings()
-    const body = `🏨 طلب جائزة\n\n👤 الضيف: ${pending.name ?? 'ضيف'}\n📱 الجوال: ${pending.phone ?? '-'}\n🏆 الفئة: -\n🎁 الجائزة: ${pending.prizeLabel}\n🔑 كود التحقق: ${pending.code}\n\nتم الإرسال من صفحة الضيف`
+    const body = `🏨 طلب جائزة\n\n👤 الضيف: ${pending.name ?? 'ضيف'}\n📱 الجوال: ${pending.phone ?? '-'}\n🪪 رقم الهوية: ${pending.id ?? '-'}\n🏆 الفئة: -\n🎁 الجائزة: ${pending.prizeLabel}\n🔑 كود التحقق: ${pending.code}\n\nتم الإرسال من صفحة الضيف`
     const text = appendVerificationSuffix(body)
     const url = `https://wa.me/${settings.whatsAppNumber.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`
     window.open(url, '_blank')
@@ -251,11 +264,11 @@ export function GuestPage() {
 
   return (
     <div className="min-h-screen-dvh flex flex-col overflow-x-hidden page-bg-leather">
-      <main className="relative z-10 flex-1 flex flex-col items-center safe-area-insets pt-6 pb-10 px-4 sm:px-4">
-        <div className="w-full max-w-[432px] min-w-0 mx-auto flex flex-col items-center">
-        <header className="w-full mb-6">
+      <main className="relative z-10 flex-1 flex flex-col items-center safe-area-insets pt-3 pb-4 sm:pt-6 sm:pb-10 px-3 sm:px-4">
+        <div className="w-full max-w-[432px] min-w-0 mx-auto flex flex-col items-center" style={{ width: '100%' }}>
+        <header className="w-full mb-3 sm:mb-6">
           <div
-            className="w-full flex flex-row items-center gap-3 px-4 py-3.5 rounded-2xl"
+            className="w-full flex flex-row items-center gap-2 sm:gap-3 px-3 py-2.5 sm:px-4 sm:py-3.5 rounded-2xl"
             dir="rtl"
             style={{
               background: 'linear-gradient(145deg, rgba(255,255,255,0.85) 0%, rgba(248,248,246,0.6) 100%)',
@@ -273,7 +286,7 @@ export function GuestPage() {
               <img
                 src="/logo-1.png"
                 alt="Elite"
-                className="h-16 sm:h-20 w-auto max-w-[140px] sm:max-w-[180px] object-contain"
+                className="h-14 sm:h-20 w-auto max-w-[120px] sm:max-w-[180px] object-contain"
                 decoding="async"
                 fetchPriority="high"
                 style={{
@@ -310,7 +323,7 @@ export function GuestPage() {
                 aria-hidden
               />
               <h1
-                className="text-[1.25rem] sm:text-[1.4rem] font-bold tracking-tight"
+                className="text-[1.1rem] sm:text-[1.4rem] font-bold tracking-tight"
                 style={{
                   color: '#1a1917',
                   fontFamily: 'Tajawal, Cairo, sans-serif',
@@ -321,7 +334,7 @@ export function GuestPage() {
                 عجلة الولاء
               </h1>
               <p
-                className="text-[0.8rem] sm:text-[0.875rem] mt-1.5 font-medium tracking-wide"
+                className="text-[0.75rem] sm:text-[0.875rem] mt-1 sm:mt-1.5 font-medium tracking-wide"
                 style={{
                   color: '#5c5348',
                   fontFamily: 'Tajawal, Cairo, sans-serif',
@@ -498,6 +511,7 @@ export function GuestPage() {
             code={previousPrizeData.code}
             guestName={checkedGuest?.name ?? ''}
             guestPhone={checkedGuest?.phone ?? lastCheckedPhone ?? ''}
+            guestId={checkedGuest?.idLastDigits ? `آخر 4 أرقام: ${checkedGuest.idLastDigits}` : ''}
             onDone={() => {
               setPreviousPrizeData(null)
               setPhase('wheel')

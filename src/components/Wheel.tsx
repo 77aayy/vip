@@ -70,7 +70,11 @@ export function Wheel({
   }, [triggerSpin, spinning])
 
   const segmentAngle = 360 / prizes.length
-  const size = Math.min(340, typeof window !== 'undefined' ? window.innerWidth - 32 : 340)
+  const segmentFontSize = prizes.length > 12 ? 11 : prizes.length > 10 ? 13 : 15.6
+  const isNarrow = typeof window !== 'undefined' && window.innerWidth < 400
+  const size = typeof window !== 'undefined'
+    ? Math.min(isNarrow ? 300 : 340, window.innerWidth - (isNarrow ? 24 : 32))
+    : 340
   const rimWidth = 12
   const innerSize = size - 8
   const cx = innerSize / 2
@@ -189,9 +193,8 @@ export function Wheel({
   const raysSize = wheelSize + 48
 
   return (
-    <div className="flex flex-col items-center justify-center w-full max-w-[432px] min-w-0 px-0 py-6 safe-area-pb" style={{ marginInline: 'auto' }}>
-      <div className="relative flex justify-center items-center" style={{ width: '100%', maxWidth: raysSize, marginInline: 'auto' }}>
-        <div className="relative shrink-0" style={{ width: raysSize, height: raysSize }}>
+    <div className="flex flex-col items-center justify-center w-full max-w-[432px] min-w-0 mx-auto px-0 py-2 sm:py-6 safe-area-pb">
+      <div className="relative mx-auto" style={{ width: raysSize, height: raysSize }}>
         <div
           className="wheel-glow relative rounded-full select-none touch-none p-4 overflow-visible"
           style={{
@@ -330,15 +333,15 @@ export function Wheel({
                     y={seg.textY}
                     textAnchor="middle"
                     fill="#3d3428"
-                    fontSize={SEGMENT_FONT_SIZE}
+                    fontSize={segmentFontSize}
                     fontWeight="700"
                     fontFamily="Tajawal, Cairo, sans-serif"
                     transform={`rotate(${seg.textRotation}, ${seg.textX}, ${seg.textY})`}
                   >
                     {seg.displayLabelLines.length === 2 ? (
                       <>
-                        <tspan x={seg.textX} dy={-SEGMENT_FONT_SIZE * 0.5}>{seg.displayLabelLines[0]}</tspan>
-                        <tspan x={seg.textX} dy={SEGMENT_FONT_SIZE}>{seg.displayLabelLines[1]}</tspan>
+                        <tspan x={seg.textX} dy={-segmentFontSize * 0.5}>{seg.displayLabelLines[0]}</tspan>
+                        <tspan x={seg.textX} dy={segmentFontSize}>{seg.displayLabelLines[1]}</tspan>
                       </>
                     ) : (
                       <tspan x={seg.textX} dy={0}>{seg.displayLabelLines[0]}</tspan>
@@ -406,11 +409,8 @@ export function Wheel({
           </div>
         </div>
       </div>
-      </div>
-      </div>
-
-      <div className="mt-6 flex flex-row flex-wrap items-end justify-center gap-4 sm:gap-6 w-full max-w-[432px] min-w-0 mx-auto px-0">
-        <div className="flex-1 min-w-0 sm:min-w-[200px] w-full sm:w-auto sm:max-w-[280px] flex flex-col items-center gap-1.5 min-h-[48px] sm:min-h-[120px]">
+      <div className="mt-3 sm:mt-6 flex flex-row flex-wrap items-end justify-center gap-3 sm:gap-6 w-full max-w-[432px] min-w-0 mx-auto px-0" style={{ direction: 'ltr' }}>
+        <div className="flex-1 min-w-0 sm:min-w-[200px] w-full sm:w-auto sm:max-w-[280px] flex flex-col items-center gap-1 sm:gap-1.5 min-h-[44px] sm:min-h-[120px]">
           {!skipPhoneCheck && (
             <p
               className="text-[0.6875rem] text-center leading-tight flex-1"
@@ -443,7 +443,7 @@ export function Wheel({
           </button>
         </div>
         {onSkipGift && !skipPhoneCheck && (
-          <div className="flex-1 min-w-0 sm:min-w-[200px] w-full sm:w-auto sm:max-w-[280px] flex flex-col items-center gap-1.5 min-h-[48px] sm:min-h-[120px]">
+          <div className="flex-1 min-w-0 sm:min-w-[200px] w-full sm:w-auto sm:max-w-[280px] flex flex-col items-center gap-1 sm:gap-1.5 min-h-[44px] sm:min-h-[120px]">
             <p
               className="text-[0.6875rem] text-center leading-tight flex-1"
               style={{ color: '#5c5348', fontFamily: 'Tajawal, Cairo, sans-serif' }}
@@ -471,6 +471,7 @@ export function Wheel({
             </button>
           </div>
         )}
+      </div>
       </div>
     </div>
   )

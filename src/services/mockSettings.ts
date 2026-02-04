@@ -1,14 +1,22 @@
 import type { Prize, Settings } from '@/types'
 
 export const defaultPrizes: Prize[] = [
-  { id: '1', label: '500 نقطة', percent: 12, unlimited: true },
-  { id: '2', label: 'خصم 10%', percent: 12, unlimited: true },
-  { id: '3', label: 'مشروب مجاني', percent: 13, unlimited: true },
-  { id: '4', label: 'ترقية غرفة', percent: 13, maxWins: 8 },
-  { id: '5', label: 'وجبة خفيفة', percent: 12, unlimited: true },
-  { id: '6', label: 'وجبة إفطار', percent: 13, unlimited: true },
-  { id: '7', label: 'وجبة غداء', percent: 12, unlimited: true },
-  { id: '8', label: 'توصيل مجاني', percent: 13, unlimited: true },
+  { id: '1', label: '500 نقطة', percent: 6, unlimited: true },
+  { id: '2', label: 'خصم 10%', percent: 6, unlimited: true },
+  { id: '3', label: 'مشروب مجاني', percent: 6, unlimited: true },
+  { id: '4', label: 'ترقية غرفة', percent: 6, maxWins: 8 },
+  { id: '5', label: 'وجبة إفطار', percent: 6, unlimited: true },
+  { id: '6', label: 'وجبة غداء', percent: 6, unlimited: true },
+  { id: '7', label: 'ليلة مجانية', percent: 6, unlimited: true },
+  { id: '8', label: 'خصم 15%', percent: 6, unlimited: true },
+  { id: '9', label: 'جناح بالورود', percent: 6, unlimited: true },
+  { id: '10', label: 'ميني بار', percent: 6, unlimited: true },
+  { id: '11', label: 'قهوة عربي', percent: 6, unlimited: true },
+  { id: '12', label: 'خروج متأخر', percent: 6, unlimited: true },
+  { id: '13', label: 'ليلة+هدية', percent: 6, unlimited: true },
+  { id: '14', label: 'ليلتان+الثالثة هدية', percent: 6, unlimited: true },
+  { id: '15', label: 'إليت ذهبي', percent: 6, unlimited: true },
+  { id: '16', label: 'إليت فضيّ', percent: 6, unlimited: true },
 ]
 
 export const defaultSettings: Settings = {

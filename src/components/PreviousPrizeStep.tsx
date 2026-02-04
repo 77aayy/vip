@@ -7,12 +7,14 @@ interface PreviousPrizeStepProps {
   guestName?: string
   /** رقم الجوال — لملء رسالة واتساب (اختياري) */
   guestPhone?: string
+  /** رقم هوية الضيف أو آخر أرقام (لإدراجه في رسالة واتساب) */
+  guestId?: string
   /** بعد الإرسال (اختياري) للعودة للعجلة أو البداية */
   onDone?: () => void
 }
 
 /** بناء نص واتساب مع توقيت/هاش للتحقق من مصدر النظام */
-function buildWhatsAppText(prizeLabel: string, code: string, name?: string, phone?: string): string {
+function buildWhatsAppText(prizeLabel: string, code: string, name?: string, phone?: string, idNum?: string): string {
   const ts = new Date().toISOString().slice(0, 19).replace('T', ' ')
   const hash = Math.random().toString(36).slice(2, 8).toUpperCase()
   const lines = [
@@ -20,6 +22,7 @@ function buildWhatsAppText(prizeLabel: string, code: string, name?: string, phon
     '',
     `👤 الضيف: ${name ?? 'ضيف'}`,
     `📱 الجوال: ${phone ?? '-'}`,
+    `🪪 رقم الهوية: ${idNum ?? '-'}`,
     `🎁 الجائزة: ${prizeLabel}`,
     `🔑 كود التحقق: ${code}`,
     '',
@@ -28,12 +31,12 @@ function buildWhatsAppText(prizeLabel: string, code: string, name?: string, phon
   return lines.join('\n')
 }
 
-export function PreviousPrizeStep({ prizeLabel, code, guestName = '', guestPhone = '', onDone }: PreviousPrizeStepProps) {
+export function PreviousPrizeStep({ prizeLabel, code, guestName = '', guestPhone = '', guestId = '', onDone }: PreviousPrizeStepProps) {
   const settings = getSettings()
   const whatsAppNumber = settings.whatsAppNumber.replace(/\D/g, '')
 
   const handleSendWhatsApp = () => {
-    const text = buildWhatsAppText(prizeLabel, code, guestName.trim() || undefined, guestPhone.trim() || undefined)
+    const text = buildWhatsAppText(prizeLabel, code, guestName.trim() || undefined, guestPhone.trim() || undefined, guestId.trim() || undefined)
     const url = `https://wa.me/${whatsAppNumber}?text=${encodeURIComponent(text)}`
     window.open(url, '_blank')
     onDone?.()

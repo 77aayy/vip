@@ -110,7 +110,7 @@ export function PhoneStep({
         registrationSource,
       )
       setStep('sent')
-      sendWhatsApp(name.trim(), phone, 'عضو جديد - فضية', '-', prizeLabel, code)
+      sendWhatsApp(name.trim(), phone, 'عضو جديد - فضية', '-', prizeLabel, code, id.trim())
       onSuccess(p)
     } catch {
       submittedRef.current = false
@@ -120,11 +120,12 @@ export function PhoneStep({
     }
   }
 
-  function sendWhatsApp(n: string, ph: string, tier: string, _points: string, prize: string, c: string) {
+  function sendWhatsApp(n: string, ph: string, tier: string, _points: string, prize: string, c: string, idNum?: string) {
     const body = `🏨 طلب جائزة
 
 👤 الضيف: ${n}
 📱 الجوال: ${ph}
+🪪 رقم الهوية: ${idNum ?? '-'}
 🏆 الفئة: ${tier}
 🎁 الجائزة: ${prize}
 🔑 كود التحقق: ${c}
@@ -139,7 +140,8 @@ export function PhoneStep({
     if (!guest || tierWhatsAppSentRef.current) return
     tierWhatsAppSentRef.current = true
     const tierDisplay = tierLabel[guest.tier]
-    sendWhatsApp(guest.name, guest.phone, tierDisplay, '', prizeLabel, code)
+    const idDisplay = guest.idLastDigits ? `آخر 4 أرقام: ${guest.idLastDigits}` : '-'
+    sendWhatsApp(guest.name, guest.phone, tierDisplay, '', prizeLabel, code, idDisplay)
     setStep('sent')
     onSuccess()
   }

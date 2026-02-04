@@ -352,7 +352,7 @@ export function AdminPage() {
           </div>
 
           <div className="border-t border-white/20 pt-4 mt-4">
-            <h3 className="text-white font-semibold text-[0.9375rem] mb-2">عجلة الحظ — الجوائز (5 إلى 8)</h3>
+            <h3 className="text-white font-semibold text-[0.9375rem] mb-2">عجلة الحظ — الجوائز (5 إلى 20)</h3>
             <p className="text-white/60 text-xs mb-3">حدد عدد مرات المكسب أو اختر عدد لا نهائي لكل جائزة. عند نفاد العدد لا يقع المؤشر عليها.</p>
             {settings.prizes.map((p, idx) => {
               const usage = getPrizeUsage()[p.id] ?? 0
@@ -433,7 +433,7 @@ export function AdminPage() {
                 </div>
               )
             })}
-            {settings.prizes.length < 8 && (
+            {settings.prizes.length < 20 && (
               <button
                 type="button"
                 onClick={() => {

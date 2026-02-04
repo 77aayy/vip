@@ -8,6 +8,8 @@ export interface PendingPrize {
   code: string
   name?: string
   phone?: string
+  /** رقم هوية الضيف (لإدراجه في رسالة واتساب) */
+  id?: string
 }
 
 export interface PendingExport {
