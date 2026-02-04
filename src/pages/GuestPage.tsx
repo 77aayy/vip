@@ -19,6 +19,7 @@ import { checkSpinEligibility } from '@/services/spinEligibility'
 import { appendVerificationSuffix } from '@/utils/whatsappMessage'
 import type { GuestLookup, Prize } from '@/types'
 import { PreviousPrizeStep } from '@/components/PreviousPrizeStep'
+import { InstallBanner } from '@/components/InstallBanner'
 
 const TERMS_ITEMS: string[] = [
   'المشاركة في النظام مجانية تماماً ولا تتطلب أي دفع.',
