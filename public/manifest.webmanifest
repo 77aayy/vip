@@ -1,0 +1,27 @@
+{
+  "name": "عجلة الولاء | Elite Loyalty Wheel",
+  "short_name": "عجلة الولاء",
+  "description": "هدايا إليت لعملائها المميزين — عجلة الحظ والعضوية",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#0c0a09",
+  "background_color": "#0a0a0a",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/logo-1.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo-1.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+rules_version = '2';
+// قواعد أمان Firestore — عجلة الولاء (elite-vip-36dd8)
+// القراءة والكتابة مفتوحة للتطبيق الويب (بدون Auth)؛ يمكن لاحقاً إضافة تحقق بالهوية.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // أعضاء الفئات والكشف — قراءة وكتابة للتطبيق
+    match /members_silver/{docId} {
+      allow read, write: if true;
+    }
+    match /members_gold/{docId} {
+      allow read, write: if true;
+    }
+    match /members_platinum/{docId} {
+      allow read, write: if true;
+    }
+    match /revenue/{docId} {
+      allow read, write: if true;
+    }
+    // الإعدادات واستخدام الجوائز
+    match /config/{docId} {
+      allow read, write: if true;
+    }
+    // سجل العضويات الجديدة (لتضمينها في الفضي لاحقاً)
+    match /new_members/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

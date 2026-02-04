@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+*.local
+
+# Environment (مفاتيح Firebase — لا ترفع أبداً)
+.env
+.env.local
+.env.*.local
+
+# Service account JSON (استخدم على السيرفر فقط — ممنوع في المشروع)
+*-service-account*.json
+*-adminsdk*.json
+
+# Firebase CLI
+.firebase/
+firebase-debug*.log
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+*.log
