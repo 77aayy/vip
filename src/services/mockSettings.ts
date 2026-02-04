@@ -16,7 +16,7 @@ export const defaultSettings: Settings = {
   revenueToPoints: 1,
   pointsSilverToGold: 10000,
   pointsGoldToPlatinum: 12000,
-  whatsAppNumber: '966500000000',
+  whatsAppNumber: '966126076060',
   instagramUrl: '',
   messages: {
     silver: 'أنت عميل فضي، معك {points} نقطة. الرجاء الاستمرار للوصول إلى {next} نقطة للانتقال إلى الذهبي.',

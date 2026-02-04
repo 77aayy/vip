@@ -456,7 +456,7 @@ export function AdminPage() {
               onChange={(e) =>
                 setSettingsState((s) => ({ ...s, whatsAppNumber: e.target.value.trim() }))
               }
-              placeholder="966500000000"
+              placeholder="966126076060"
               className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40"
             />
           </div>

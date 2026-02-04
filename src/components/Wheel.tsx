@@ -87,11 +87,11 @@ export function Wheel({
       const rad = (midAngle - 90) * (Math.PI / 180)
       const tx = cx + textRadius * Math.cos(rad)
       const ty = cy + textRadius * Math.sin(rad)
-      // زاوية من مركز النص إلى مركز العجلة (بالدرجات)؛ النص يُدار بحيث "أعلى" الحروف يتجه للداخل
+      // زاوية من مركز النص إلى مركز العجلة (بالدرجات)؛ النص يُدار بحيث يكون مقروءاً عند وقوف المؤشر على الجائزة (أعلى الحروف للخارج)
       const angleToCenterRad = Math.atan2(cy - ty, cx - tx)
       let angleToCenterDeg = (angleToCenterRad * 180) / Math.PI
       if (angleToCenterDeg < 0) angleToCenterDeg += 360
-      const textRotation = (angleToCenterDeg + 90) % 360
+      const textRotation = (angleToCenterDeg + 270) % 360
       const label = p.label
       const displayLabelLines: string[] = label.includes(' ')
         ? [label.split(' ')[0], label.split(' ').slice(1).join(' ')]
@@ -189,8 +189,9 @@ export function Wheel({
   const raysSize = wheelSize + 48
 
   return (
-    <div className="flex flex-col items-center justify-center w-full max-w-[432px] min-w-0 mx-auto px-0 py-6 safe-area-pb">
-      <div className="relative mx-auto" style={{ width: raysSize, height: raysSize }}>
+    <div className="flex flex-col items-center justify-center w-full max-w-[432px] min-w-0 px-0 py-6 safe-area-pb" style={{ marginInline: 'auto' }}>
+      <div className="relative flex justify-center items-center" style={{ width: '100%', maxWidth: raysSize, marginInline: 'auto' }}>
+        <div className="relative shrink-0" style={{ width: raysSize, height: raysSize }}>
         <div
           className="wheel-glow relative rounded-full select-none touch-none p-4 overflow-visible"
           style={{
@@ -404,6 +405,7 @@ export function Wheel({
             />
           </div>
         </div>
+      </div>
       </div>
       </div>
 
