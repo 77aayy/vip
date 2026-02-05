@@ -185,7 +185,7 @@ export function Wheel({
         ? targetWinnerIndex
         : canPick[Math.floor(Math.random() * canPick.length)]
     const winnerMidAngle = winnerIndex * segmentAngle + segmentAngle / 2
-    const extraTurns = 1.5
+    const extraTurns = 1
     const currentMod = ((rotation % 360) + 360) % 360
     const targetAngle = isRtl ? (360 - winnerMidAngle) % 360 : winnerMidAngle
     const offsetToWinner = (targetAngle - currentMod + 360) % 360
@@ -193,8 +193,8 @@ export function Wheel({
     const start = performance.now()
     const startRot = rotation
     const totalDelta = totalRotation - startRot
-    const durationMaxMs = 13000
-    // Cubic-Bezier(0.1, 0, 0, 1) — حركة فخمة (احتكاك/جاذبية)، العجلة بتهدي ببطء
+    const durationMaxMs = 3200
+    // Cubic-Bezier(0.1, 0, 0, 1) — حركة مرنة، النزيل لا ينتظر أكثر من ~3 ثوانٍ
     const run = (now: number) => {
       const elapsed = now - start
       const tLinear = Math.min(1, elapsed / durationMaxMs)
