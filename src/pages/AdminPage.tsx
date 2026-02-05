@@ -242,6 +242,8 @@ export function AdminPage() {
   const [refreshingNewMembersLog, setRefreshingNewMembersLog] = useState(false)
   const [showNewMembersLog, setShowNewMembersLog] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [saveFeedback, setSaveFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [settingsSections, setSettingsSections] = useState({
     points: true,
     prizes: true,
@@ -486,17 +488,26 @@ export function AdminPage() {
   }, [useFirestore])
 
   const handleSaveSettings = useCallback(async () => {
-    setSettings(settings)
+    setSavingSettings(true)
+    setSaveFeedback(null)
     setError('')
-    if (useFirestore) {
-      try {
+    try {
+      setSettings(settings)
+      if (useFirestore) {
         await writeSettingsToFirestore(settings)
         setSuccess('تم حفظ الإعدادات (Firebase)')
-      } catch {
-        setError('فشل حفظ الإعدادات على Firebase')
+        setSaveFeedback({ type: 'success', message: 'تم حفظ الإعدادات (Firebase)' })
+      } else {
+        setSuccess('تم حفظ الإعدادات')
+        setSaveFeedback({ type: 'success', message: 'تم حفظ الإعدادات' })
       }
-    } else {
-      setSuccess('تم حفظ الإعدادات')
+      setTimeout(() => setSaveFeedback(null), 3000)
+    } catch {
+      setError('فشل حفظ الإعدادات على Firebase')
+      setSaveFeedback({ type: 'error', message: 'فشل حفظ الإعدادات على Firebase' })
+      setTimeout(() => setSaveFeedback(null), 4000)
+    } finally {
+      setSavingSettings(false)
     }
   }, [settings, useFirestore])
 
@@ -1489,13 +1500,42 @@ export function AdminPage() {
               className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-surface-card/95 backdrop-blur-sm border-t border-white/20 shadow-[0_-4px_20px_rgba(0,0,0,0.3)] safe-area-insets"
               style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
             >
-              <div className="w-full max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl mx-auto">
+              <div className="w-full max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl mx-auto space-y-2">
+                {saveFeedback && (
+                  <div
+                    className={`rounded-xl px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2 animate-fade-in ${
+                      saveFeedback.type === 'success'
+                        ? 'bg-green-500/25 text-green-200 border border-green-500/40'
+                        : 'bg-red-500/25 text-red-200 border border-red-500/40'
+                    }`}
+                  >
+                    {saveFeedback.type === 'success' ? (
+                      <>
+                        <span aria-hidden>✓</span>
+                        {saveFeedback.message}
+                      </>
+                    ) : (
+                      <>
+                        <span aria-hidden>✕</span>
+                        {saveFeedback.message}
+                      </>
+                    )}
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={handleSaveSettings}
-                  className="w-full py-3 rounded-xl bg-accent text-white font-medium hover:bg-accent-hover transition-colors"
+                  disabled={savingSettings}
+                  className="w-full py-3 rounded-xl bg-accent text-white font-medium hover:bg-accent-hover transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  حفظ الإعدادات
+                  {savingSettings ? (
+                    <>
+                      <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden />
+                      جاري الحفظ...
+                    </>
+                  ) : (
+                    'حفظ الإعدادات'
+                  )}
                 </button>
               </div>
             </div>
