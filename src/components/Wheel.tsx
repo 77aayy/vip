@@ -136,14 +136,18 @@ export function Wheel({
           ? [label.slice(0, maxCharsPerLine), label.slice(maxCharsPerLine)]
           : [label]
       } else {
-        const first = parts[0]
-        const rest = parts.slice(1).join(' ')
-        if (first.length > maxCharsPerLine || rest.length > maxCharsPerLine) {
-          const mid = Math.ceil(label.length / 2)
-          displayLabelLines = [label.slice(0, mid), label.slice(mid)]
-        } else {
-          displayLabelLines = [first, rest]
+        // توزيع الكلمات على سطرين دون قطع كلمة (ليلة مجانية → ليلة / مجانية وليس ليلة م / جانية)
+        let line1 = ''
+        let line2 = ''
+        for (const word of parts) {
+          const withWord = line1 ? `${line1} ${word}` : word
+          if (line1.length === 0 || withWord.length <= maxCharsPerLine) {
+            line1 = withWord
+          } else {
+            line2 = line2 ? `${line2} ${word}` : word
+          }
         }
+        displayLabelLines = line2 ? [line1, line2] : [line1]
       }
       const path = describeArc(cx, cy, segmentRadius, startAngle, endAngle)
       const clipPathD = path
