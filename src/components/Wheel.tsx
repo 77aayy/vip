@@ -177,6 +177,9 @@ export function Wheel({
     return i
   }
 
+  const SWAY_DURATION_MS = 2500
+  const SWAY_AMPLITUDE_DEG = 14
+
   function handleSpin() {
     if (spinning || disabled) return
     const indices = availableIndices ?? prizes.map((_, i) => i)
@@ -194,48 +197,61 @@ export function Wheel({
     const targetAngle = isRtl ? (360 - winnerMidAngle) % 360 : winnerMidAngle
     const offsetToWinner = (targetAngle - currentMod + 360) % 360
     const totalRotation = rotation + extraTurns * 360 + offsetToWinner
-    const start = performance.now()
     const startRot = rotation
     const totalDelta = totalRotation - startRot
     const durationMaxMs = 1724
-    // Cubic-Bezier(0.1, 0, 0, 1) — حركة مرنة، النزيل لا ينتظر أكثر من ~3 ثوانٍ
-    const run = (now: number) => {
-      const elapsed = now - start
-      const tLinear = Math.min(1, elapsed / durationMaxMs)
-      const progress = cubicBezierEaseOut(tLinear)
-      const base = startRot + totalDelta * progress
-      const swayStart = 0.72
-      let sway: number
-      if (progress < swayStart || progress >= 1) {
-        sway = 0
-      } else {
-        const t = (progress - swayStart) / (1 - swayStart)
-        const inOut = Math.sin(Math.PI * t) * Math.sin(Math.PI * t)
-        sway = -0.5 * segmentAngle * inOut
-      }
-      const current = base + sway
-      setRotation(current)
-      const cb = onSpinProgressRef.current
-      if (cb) flushSync(() => cb(progress))
-      const segmentIndex = Math.floor((current - startRot) / segmentAngle)
-      if (segmentIndex > lastTickedSegment.current) {
-        lastTickedSegment.current = segmentIndex
-        playTick()
-      }
-      const done = progress >= 0.999 || elapsed >= durationMaxMs
-      if (!done) {
+    const swayStartTime = performance.now()
+
+    const runSway = (now: number) => {
+      const elapsed = now - swayStartTime
+      if (elapsed >= SWAY_DURATION_MS) {
+        setRotation(startRot)
+        const spinStart = performance.now()
+        const run = (t: number) => {
+          const elapsedSpin = t - spinStart
+          const tLinear = Math.min(1, elapsedSpin / durationMaxMs)
+          const progress = cubicBezierEaseOut(tLinear)
+          const base = startRot + totalDelta * progress
+          const swayStart = 0.72
+          let sway: number
+          if (progress < swayStart || progress >= 1) {
+            sway = 0
+          } else {
+            const swayT = (progress - swayStart) / (1 - swayStart)
+            const inOut = Math.sin(Math.PI * swayT) * Math.sin(Math.PI * swayT)
+            sway = -0.5 * segmentAngle * inOut
+          }
+          const current = base + sway
+          setRotation(current)
+          const cb = onSpinProgressRef.current
+          if (cb) flushSync(() => cb(progress))
+          const segmentIndex = Math.floor((current - startRot) / segmentAngle)
+          if (segmentIndex > lastTickedSegment.current) {
+            lastTickedSegment.current = segmentIndex
+            playTick()
+          }
+          const done = progress >= 0.999 || elapsedSpin >= durationMaxMs
+          if (!done) {
+            requestAnimationFrame(run)
+          } else {
+            const cb = onSpinProgressRef.current
+            if (cb) flushSync(() => cb(1))
+            setRotation(totalRotation)
+            setSpinning(false)
+            const finalIndex = getSegmentIndexAtTop(totalRotation)
+            const prize = prizes[finalIndex]
+            onSpinEnd({ id: prize.id, label: prize.label, percent: prize.percent })
+          }
+        }
         requestAnimationFrame(run)
-      } else {
-        const cb = onSpinProgressRef.current
-        if (cb) flushSync(() => cb(1))
-        setRotation(totalRotation)
-        setSpinning(false)
-        const finalIndex = getSegmentIndexAtTop(totalRotation)
-        const prize = prizes[finalIndex]
-        onSpinEnd({ id: prize.id, label: prize.label, percent: prize.percent })
+        return
       }
+      const t = elapsed / SWAY_DURATION_MS
+      const swayAngle = SWAY_AMPLITUDE_DEG * Math.sin(2 * Math.PI * t * 1.2)
+      setRotation(startRot + swayAngle)
+      requestAnimationFrame(runSway)
     }
-    requestAnimationFrame(run)
+    requestAnimationFrame(runSway)
   }
 
   const wheelSize = size + rimWidth * 2 + 16
