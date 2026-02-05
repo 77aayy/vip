@@ -53,11 +53,22 @@ export function Wheel({
 }: WheelProps) {
   const [rotation, setRotation] = useState(0)
   const [spinning, setSpinning] = useState(false)
+  const [viewport, setViewport] = useState(() =>
+    typeof window !== 'undefined'
+      ? { w: window.innerWidth, h: window.innerHeight }
+      : { w: 640, h: 800 }
+  )
   const { playTick } = useSound()
   const lastTickedSegment = useRef(-1)
   const lastTriggerSpin = useRef(0)
   const onSpinProgressRef = useRef(onSpinProgress)
   onSpinProgressRef.current = onSpinProgress
+
+  useEffect(() => {
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight })
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   useEffect(() => {
     if (triggerSpin > 0 && triggerSpin !== lastTriggerSpin.current && !spinning) {
@@ -68,23 +79,25 @@ export function Wheel({
 
   const segmentAngle = 360 / prizes.length
   const segmentFontSize = prizes.length > 12 ? 12 : prizes.length > 10 ? 13.5 : 15
-  const isNarrow = typeof window !== 'undefined' && window.innerWidth < 400
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640
+  const isNarrow = viewport.w < 400
+  const isMobile = viewport.w < 640
   const rimWidth = 12
   const raysExtra = rimWidth * 2 + 16 + 48
-  const size = typeof window !== 'undefined'
-    ? (() => {
-        const maxByViewport = window.innerWidth - (isNarrow ? 24 : 32)
-        const maxByRays = window.innerWidth - 24 - raysExtra
-        let cap = Math.min(isNarrow ? 300 : 340, maxByViewport, maxByRays)
-        if (isMobile && typeof window !== 'undefined') {
-          const spaceForWheel = (window.innerHeight - 180) * 0.5
-          const maxByHeight = Math.floor(spaceForWheel - raysExtra)
-          if (maxByHeight > 0 && maxByHeight < cap) cap = Math.max(200, maxByHeight)
-        }
-        return Math.max(200, cap)
-      })()
-    : 340
+  const size = (() => {
+    const maxByViewport = viewport.w - (isNarrow ? 24 : 32)
+    const maxByRays = viewport.w - 24 - raysExtra
+    let cap: number
+    if (isMobile) {
+      cap = Math.min(isNarrow ? 300 : 340, maxByViewport, maxByRays)
+      const spaceForWheel = (viewport.h - 180) * 0.5
+      const maxByHeight = Math.floor(spaceForWheel - raysExtra)
+      if (maxByHeight > 0 && maxByHeight < cap) cap = Math.max(200, maxByHeight)
+    } else {
+      const maxSize = viewport.w < 768 ? 340 : viewport.w < 1024 ? 400 : Math.min(480, Math.floor(viewport.w * 0.45))
+      cap = Math.min(maxSize, maxByViewport, maxByRays)
+    }
+    return Math.max(200, cap)
+  })()
   const innerSize = size - 8
   const cx = innerSize / 2
   const cy = innerSize / 2

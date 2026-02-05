@@ -1,21 +1,39 @@
 /**
  * Firebase — التأسيس (المرحلة ١)
- * التهيئة وربط Firestore و Storage. المفاتيح من .env فقط (ممنوع وضعها في الكود).
+ * التهيئة من .env أو من إعداد مُلصق في لوحة الأدمن (localStorage).
  */
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app'
 import { getFirestore, type Firestore } from 'firebase/firestore'
 import { getStorage, type FirebaseStorage } from 'firebase/storage'
 
-function getFirebaseConfig() {
+const FIREBASE_CONFIG_STORAGE_KEY = 'vip_firebase_config'
+
+export type FirebaseConfigShape = {
+  apiKey: string
+  authDomain?: string
+  projectId: string
+  storageBucket?: string
+  messagingSenderId?: string
+  appId?: string
+}
+
+function getFirebaseConfig(): FirebaseConfigShape | null {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(FIREBASE_CONFIG_STORAGE_KEY) : null
+    if (raw) {
+      const parsed = JSON.parse(raw) as FirebaseConfigShape
+      if (parsed?.apiKey && parsed?.projectId) return parsed
+    }
+  } catch {
+    // ignore
+  }
   const apiKey = import.meta.env.VITE_FIREBASE_API_KEY as string | undefined
   const authDomain = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined
   const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined
   const storageBucket = import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined
   const messagingSenderId = import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined
   const appId = import.meta.env.VITE_FIREBASE_APP_ID as string | undefined
-
   if (!apiKey || !projectId) return null
-
   return {
     apiKey,
     authDomain: authDomain ?? undefined,
@@ -23,6 +41,24 @@ function getFirebaseConfig() {
     storageBucket: storageBucket ?? undefined,
     messagingSenderId: messagingSenderId ?? undefined,
     appId: appId ?? undefined,
+  }
+}
+
+/** حفظ إعداد Firebase من لوحة الأدمن (لصق من Console). */
+export function setFirebaseConfigOverride(config: FirebaseConfigShape): void {
+  try {
+    localStorage.setItem(FIREBASE_CONFIG_STORAGE_KEY, JSON.stringify(config))
+  } catch {
+    // ignore
+  }
+}
+
+/** مسح الإعداد المُلصق والعودة لاستخدام .env. */
+export function clearFirebaseConfigOverride(): void {
+  try {
+    localStorage.removeItem(FIREBASE_CONFIG_STORAGE_KEY)
+  } catch {
+    // ignore
   }
 }
 

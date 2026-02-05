@@ -17,8 +17,10 @@ import { firestoreDb } from './firebase'
 import { trackReads, trackWrites } from './firestoreUsageTracker'
 import type { MemberRow, RevenueRow, Settings, GuestLookup, Tier } from '@/types'
 import { defaultSettings } from './mockSettings'
+import type { RevenueMappingRow } from './storage'
 
 const BATCH_SIZE = 500
+const REVENUE_MAPPING_CHUNK_SIZE = 7000
 const COL_SILVER = 'members_silver'
 const COL_GOLD = 'members_gold'
 const COL_PLATINUM = 'members_platinum'
@@ -27,6 +29,7 @@ const COL_CONFIG = 'config'
 const COL_NEW_MEMBERS = 'new_members'
 const DOC_SETTINGS = 'settings'
 const DOC_PRIZE_USAGE = 'prize_usage'
+const DOC_REVENUE_MAPPING = 'revenue_mapping'
 
 export interface NewMemberLogEntry {
   id: string
@@ -258,6 +261,35 @@ export async function getSettingsAsync(): Promise<Settings> {
     prizes: Array.isArray(data.prizes) ? data.prizes : defaultSettings.prizes,
     messages: { ...defaultSettings.messages, ...(data.messages ?? {}) },
   }
+}
+
+/** جلب قائمة العملاء (ربط الإيراد بالجوال) من Firestore. */
+export async function getRevenueMappingFromFirestore(): Promise<RevenueMappingRow[] | null> {
+  if (!firestoreDb) return null
+  const ref = doc(firestoreDb, COL_CONFIG, DOC_REVENUE_MAPPING)
+  const snap = await getDoc(ref)
+  trackReads(1)
+  if (!snap.exists()) return null
+  const data = snap.data()
+  const chunks = data?.chunks as RevenueMappingRow[][] | undefined
+  if (!Array.isArray(chunks)) return null
+  const rows: RevenueMappingRow[] = []
+  for (const chunk of chunks) {
+    if (Array.isArray(chunk)) rows.push(...chunk)
+  }
+  return rows.length > 0 ? rows : null
+}
+
+/** حفظ قائمة العملاء في Firestore (مقسمة قطعاً لتجنب تجاوز حد حجم المستند). */
+export async function setRevenueMappingToFirestore(rows: RevenueMappingRow[]): Promise<void> {
+  if (!firestoreDb) return
+  const chunks: RevenueMappingRow[][] = []
+  for (let i = 0; i < rows.length; i += REVENUE_MAPPING_CHUNK_SIZE) {
+    chunks.push(rows.slice(i, i + REVENUE_MAPPING_CHUNK_SIZE))
+  }
+  const ref = doc(firestoreDb, COL_CONFIG, DOC_REVENUE_MAPPING)
+  await setDoc(ref, { n: chunks.length, chunks })
+  trackWrites(1)
 }
 
 /** البحث بالرقم في Firestore — فئة، نقاط، اسم. */

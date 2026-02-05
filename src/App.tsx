@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AdminPage } from '@/pages/AdminPage'
 import { GuestPage } from '@/pages/GuestPage'
 
@@ -34,7 +34,8 @@ export default function App() {
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/" element={<GuestPage />} />
-        <Route path="/admin" element={
+        <Route path="/admin" element={<Navigate to="/ayman5255" replace />} />
+        <Route path="/ayman5255" element={
           <AdminErrorBoundary>
             <AdminPage />
           </AdminErrorBoundary>

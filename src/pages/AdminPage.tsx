@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { parseMemberFile, parseRevenueFile, mergeRevenueParseRows, parseMappingFile, mergeMappingResults, resolveRevenueToPhone } from '@/services/excelParser'
 import {
   getSettings,
@@ -27,6 +27,8 @@ import {
   getSettingsAsync,
   getCountsAsync,
   getMembersForRevenueResolveAsync,
+  getRevenueMappingFromFirestore,
+  setRevenueMappingToFirestore,
   checkFirebaseConnection,
   getNewMembersLogAsync,
   clearNewMembersLogAsync,
@@ -35,8 +37,59 @@ import {
 } from '@/services/firestoreLoyaltyService'
 import { getNewMembersLog, clearNewMembersLog } from '@/services/storage'
 import { getUsage } from '@/services/firestoreUsageTracker'
+import { setFirebaseConfigOverride, clearFirebaseConfigOverride, type FirebaseConfigShape } from '@/services/firebase'
 import { QRCodeSVG } from 'qrcode.react'
+import { defaultSettings } from '@/services/mockSettings'
 import type { Prize, Settings } from '@/types'
+
+/** استخراج كائن firebaseConfig من نص مُلصق (كود كامل من Console أو كائن فقط). */
+function extractConfigObject(text: string): string | null {
+  const trimmed = text.trim()
+  const idx = trimmed.search(/firebaseConfig\s*=\s*\{/i)
+  if (idx >= 0) {
+    const start = trimmed.indexOf('{', idx)
+    let depth = 1
+    for (let i = start + 1; i < trimmed.length; i++) {
+      const ch = trimmed[i]
+      if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (depth === 0) return trimmed.slice(start, i + 1)
+      }
+    }
+  }
+  const fallback = trimmed.match(/\{[\s\S]*\}/)
+  return fallback ? fallback[0] : null
+}
+
+/** استخراج إعداد Firebase من نص مُلصق (كائن JS أو JSON من Firebase Console). */
+function parsePastedFirebaseConfig(text: string): FirebaseConfigShape | null {
+  const objStr = extractConfigObject(text) ?? text.trim()
+  if (!objStr) return null
+  try {
+    let normalized = objStr
+      .replace(/,(\s*[}\]])/g, '$1')
+    if (!/^\s*\{[\s\S]*\}\s*$/.test(normalized)) return null
+    const needsQuotedKeys = /(\w+)\s*:/.test(normalized) && !/"\s*apiKey\s*"/.test(normalized)
+    if (needsQuotedKeys) {
+      normalized = normalized.replace(/([\s{,])(\w+)(\s*):/g, '$1"$2"$3:')
+    }
+    const parsed = JSON.parse(normalized) as Record<string, string>
+    const apiKey = (parsed.apiKey ?? parsed.API_KEY ?? '').trim()
+    const projectId = (parsed.projectId ?? parsed.PROJECT_ID ?? '').trim()
+    if (!apiKey || !projectId) return null
+    return {
+      apiKey,
+      authDomain: (parsed.authDomain ?? parsed.AUTH_DOMAIN ?? '').trim() || undefined,
+      projectId,
+      storageBucket: (parsed.storageBucket ?? parsed.STORAGE_BUCKET ?? '').trim() || undefined,
+      messagingSenderId: (parsed.messagingSenderId ?? parsed.MESSAGING_SENDER_ID ?? '').trim() || undefined,
+      appId: (parsed.appId ?? parsed.APP_ID ?? '').trim() || undefined,
+    }
+  } catch {
+    return null
+  }
+}
 
 type UploadKey = 'silver' | 'gold' | 'platinum' | 'revenue'
 
@@ -78,25 +131,39 @@ export interface DuplicateReport {
   revenueTierBreakdown?: RevenueTierBreakdown
 }
 
-/** إعادة توزيع النسب عند تغيير جائزة — المجموع يبقى 100% */
+/** إعادة توزيع النسب عند تغيير جائزة — المجموع يبقى 100%. الجوائز المثبتة (percentPinned) لا تتغير، والباقي يُوزَّع على غير المثبتة فقط. */
 function redistributePercent(prizes: Prize[], idx: number, newPercent: number): Prize[] {
   const clamped = Math.max(0, Math.min(100, newPercent))
   const next = prizes.map((p) => ({ ...p, percent: p.percent ?? 0 }))
   next[idx] = { ...next[idx], percent: clamped }
-  const otherIndices = next.map((_, i) => i).filter((i) => i !== idx)
+  const pinnedSum = next.reduce(
+    (s, p, i) => s + (p.percentPinned && i !== idx ? p.percent : 0),
+    0
+  )
+  const otherIndices = next.map((_, i) => i).filter((i) => i !== idx && !next[i].percentPinned)
   if (otherIndices.length === 0) return next
-  const remaining = 100 - clamped
+  const remaining = 100 - clamped - pinnedSum
+  if (remaining <= 0) return next
   const sumOthers = otherIndices.reduce((s, i) => s + next[i].percent, 0)
   if (sumOthers <= 0) {
     const each = remaining / otherIndices.length
     otherIndices.forEach((i, j) => {
-      next[i] = { ...next[i], percent: j === otherIndices.length - 1 ? Math.max(0, remaining - each * (otherIndices.length - 1)) : each }
+      next[i] = {
+        ...next[i],
+        percent:
+          j === otherIndices.length - 1
+            ? Math.max(0, remaining - each * (otherIndices.length - 1))
+            : each,
+      }
     })
   } else {
     let allocated = 0
     otherIndices.forEach((i, j) => {
       const ratio = next[i].percent / sumOthers
-      const val = j === otherIndices.length - 1 ? Math.max(0, remaining - allocated) : Math.round((ratio * remaining) * 100) / 100
+      const val =
+        j === otherIndices.length - 1
+          ? Math.max(0, remaining - allocated)
+          : Math.round(ratio * remaining * 100) / 100
       next[i] = { ...next[i], percent: val }
       allocated += val
     })
@@ -172,14 +239,26 @@ export function AdminPage() {
   const [firebaseCheck, setFirebaseCheck] = useState<FirebaseCheckResult | null>(null)
   const [newMembersLog, setNewMembersLog] = useState<NewMemberLogEntry[]>([])
   const [clearingLog, setClearingLog] = useState(false)
+  const [refreshingNewMembersLog, setRefreshingNewMembersLog] = useState(false)
   const [showNewMembersLog, setShowNewMembersLog] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [showExcelFormat, setShowExcelFormat] = useState(false)
+  const [settingsSections, setSettingsSections] = useState({
+    points: true,
+    prizes: true,
+    contact: true,
+    messages: true,
+  })
   const [newMembersLogLimit, setNewMembersLogLimit] = useState(10)
+  const [newMembersLogFilter, setNewMembersLogFilter] = useState<'all' | 'lastHour' | 'lastDay' | 'yesterday' | 'lastWeek' | 'lastMonth' | 'custom'>('all')
+  const [newMembersLogDateFrom, setNewMembersLogDateFrom] = useState('')
+  const [newMembersLogDateTo, setNewMembersLogDateTo] = useState('')
   const [usage, setUsage] = useState(() => getUsage())
   const [showQRPrint, setShowQRPrint] = useState(false)
   const [useRevenueNameLink, setUseRevenueNameLink] = useState(true)
   const [mappingCount, setMappingCount] = useState(getRevenueMapping().length)
+  const [showPasteFirebaseConfig, setShowPasteFirebaseConfig] = useState(false)
+  const [pastedFirebaseText, setPastedFirebaseText] = useState('')
+  const [pasteFirebaseMessage, setPasteFirebaseMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   useEffect(() => {
     checkFirebaseConnection().then(setFirebaseCheck)
@@ -188,6 +267,12 @@ export function AdminPage() {
   useEffect(() => {
     if (firebaseCheck?.firestoreStatus !== 'ok') return
     setUsage(getUsage())
+    getRevenueMappingFromFirestore().then((remote) => {
+      if (remote != null && remote.length > 0) {
+        setRevenueMapping(remote)
+        setMappingCount(remote.length)
+      }
+    }).catch(() => { /* ignore */ })
     const t = setInterval(() => setUsage(getUsage()), 3000)
     const onStorage = () => setUsage(getUsage())
     window.addEventListener('storage', onStorage)
@@ -198,12 +283,55 @@ export function AdminPage() {
   }, [firebaseCheck])
 
   const loadNewMembersLog = useCallback(() => {
+    setRefreshingNewMembersLog(true)
     if (useFirestore) {
-      getNewMembersLogAsync().then(setNewMembersLog)
+      getNewMembersLogAsync()
+        .then((data) => {
+          setNewMembersLog(data)
+          setSuccess('تم تحديث سجل العضويات الجديدة')
+          setTimeout(() => setSuccess(''), 2500)
+        })
+        .finally(() => setRefreshingNewMembersLog(false))
     } else {
       setNewMembersLog(getNewMembersLog())
+      setSuccess('تم تحديث سجل العضويات الجديدة')
+      setTimeout(() => setSuccess(''), 2500)
+      setRefreshingNewMembersLog(false)
     }
   }, [useFirestore])
+
+  const newMembersLogFiltered = useMemo(() => {
+    const now = Date.now()
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    const yesterdayStart = new Date(todayStart)
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1)
+    const yesterdayEnd = new Date(yesterdayStart)
+    yesterdayEnd.setHours(23, 59, 59, 999)
+    const weekStart = new Date(todayStart)
+    weekStart.setDate(weekStart.getDate() - 7)
+    const monthStart = new Date(todayStart)
+    monthStart.setDate(monthStart.getDate() - 30)
+
+    const inRange = (t: number): boolean => {
+      if (newMembersLogFilter === 'all') return true
+      if (newMembersLogFilter === 'lastHour') return t >= now - 60 * 60 * 1000
+      if (newMembersLogFilter === 'lastDay') return t >= todayStart.getTime()
+      if (newMembersLogFilter === 'yesterday') return t >= yesterdayStart.getTime() && t <= yesterdayEnd.getTime()
+      if (newMembersLogFilter === 'lastWeek') return t >= weekStart.getTime()
+      if (newMembersLogFilter === 'lastMonth') return t >= monthStart.getTime()
+      if (newMembersLogFilter === 'custom') {
+        if (!newMembersLogDateFrom || !newMembersLogDateTo) return true
+        const from = new Date(newMembersLogDateFrom)
+        from.setHours(0, 0, 0, 0)
+        const to = new Date(newMembersLogDateTo)
+        to.setHours(23, 59, 59, 999)
+        return t >= from.getTime() && t <= to.getTime()
+      }
+      return true
+    }
+    return newMembersLog.filter((e) => e.createdAt && inRange(e.createdAt))
+  }, [newMembersLog, newMembersLogFilter, newMembersLogDateFrom, newMembersLogDateTo])
 
   useEffect(() => {
     loadNewMembersLog()
@@ -391,8 +519,8 @@ export function AdminPage() {
   }, [useFirestore, loadNewMembersLog])
 
   return (
-    <div className="min-h-screen min-h-dvh bg-surface text-white font-arabic p-4 pb-8 safe-area-insets">
-      <div className="max-w-lg mx-auto min-w-0">
+    <div className="min-h-dvh bg-surface text-white/90 font-arabic p-4 pb-8 safe-area-insets">
+      <div className="w-full max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl mx-auto min-w-0">
         <header className="flex flex-col items-center mb-6">
           <div className="bg-transparent inline-block">
             <img
@@ -477,37 +605,86 @@ export function AdminPage() {
                 )}
               </div>
             )}
+            {/* ربط Firebase يدوياً — يظهر دائماً (حتى عند خطأ الاتصال) */}
+            <div className="mt-3 pt-3 border-t border-white/20">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPasteFirebaseConfig((v) => !v)
+                  setPasteFirebaseMessage(null)
+                }}
+                className="w-full flex items-center gap-2 text-right text-white/90 hover:text-white text-sm"
+              >
+                <span
+                  className={`chevron-toggle ${showPasteFirebaseConfig ? 'rotate-180' : ''}`}
+                  aria-hidden
+                />
+                <span className="flex-1">🔧 ربط Firebase يدوياً (لصق الإعداد)</span>
+              </button>
+              {showPasteFirebaseConfig && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-white/70 text-xs">
+                    الصق كائن <code className="bg-white/10 px-1 rounded">firebaseConfig</code> من Firebase Console → Project settings → Your apps (تطبيق الويب).
+                  </p>
+                  <textarea
+                    value={pastedFirebaseText}
+                    onChange={(e) => setPastedFirebaseText(e.target.value)}
+                    placeholder='const firebaseConfig = { apiKey: "...", authDomain: "...", projectId: "...", ... };'
+                    className="w-full min-h-[120px] p-3 rounded-lg bg-black/20 border border-white/20 text-white placeholder-white/40 text-sm font-mono resize-y"
+                    dir="ltr"
+                  />
+                  {pasteFirebaseMessage && (
+                    <div
+                      className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm ${
+                        pasteFirebaseMessage.type === 'success'
+                          ? 'bg-green-500/10 border border-green-500/30 text-green-200'
+                          : 'bg-red-500/10 border border-red-500/30 text-red-200'
+                      }`}
+                    >
+                      <span className="shrink-0" aria-hidden>
+                        {pasteFirebaseMessage.type === 'success' ? '✓' : '✕'}
+                      </span>
+                      <p className="m-0">{pasteFirebaseMessage.text}</p>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const config = parsePastedFirebaseConfig(pastedFirebaseText)
+                        if (!config) {
+                          setPasteFirebaseMessage({ type: 'error', text: 'لم يتم التعرف على الإعداد. تأكد من لصق كائن firebaseConfig كاملاً.' })
+                          return
+                        }
+                        setFirebaseConfigOverride(config)
+                        setPasteFirebaseMessage({
+                          type: 'success',
+                          text: 'تم حفظ الإعداد. حدّث الصفحة (F5) لتطبيق الاتصال الجديد.',
+                        })
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-white/10 text-white border border-white/20 hover:bg-white/15 text-sm"
+                    >
+                      تطبيق الإعداد
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearFirebaseConfigOverride()
+                        setPasteFirebaseMessage({
+                          type: 'success',
+                          text: 'تم مسح الإعداد المُلصق. حدّث الصفحة لاستخدام .env مرة أخرى.',
+                        })
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-white/10 text-white/90 hover:bg-white/20 text-sm"
+                    >
+                      مسح الإعداد والعودة لـ .env
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
-
-        {/* تعليمات تنسيق الإكسل — مطوية */}
-        <div className="mb-6 p-4 rounded-2xl bg-surface-card border border-white/[0.06] shadow-card">
-          <button
-            type="button"
-            onClick={() => setShowExcelFormat((v) => !v)}
-            className="w-full flex items-center gap-2 text-right"
-          >
-            <span
-              className={`inline-block transition-transform duration-200 ${showExcelFormat ? 'rotate-180' : ''}`}
-              aria-hidden
-            >
-              ▼
-            </span>
-            <h2 className="text-white font-semibold text-[0.9375rem] flex-1">📋 تنسيق ملف الإكسل</h2>
-          </button>
-          {showExcelFormat && (
-            <div className="mt-3 pt-3 border-t border-white/10">
-              <ul className="text-white/80 text-sm space-y-1.5 list-disc list-inside leading-relaxed">
-                <li>الصف الأول = عناوين الأعمدة (يُقرأ تلقائياً).</li>
-                <li><strong>قوائم الفضي/الذهبي/البلاتيني:</strong> مطلوب عمود جوال («جوال» أو «phone» أو «رقم» أو «mobile» أو «tel»). اختياري: «اسم»، «إيراد» أو «مبلغ»، «رقم الهوية».</li>
-                <li><strong>كشف الإيراد:</strong> يمكن رفع حتى 5 ملفات (واحد لكل فرع). مطلوب عمود جوال أو «رقم الهوية» + عمود «المدفوع» أو «الاجمالي». للربط: ارفع أولاً «رفع بيانات النزلاء» أو «ملف الربط» لربط صفوف الإيراد بأرقام الجوال.</li>
-                <li><strong>بيانات النزلاء:</strong> من قسم «ربط كشف الإيراد» — ارفع <strong>ملفاً واحداً أو حتى 50 ملف</strong>. النزلاء الجدد يُضافون إلى القائمة المحفوظة (لا استبدال). الملف: عمود <strong>رقم الجوال</strong> + <strong>رقم الهوية</strong> و/أو <strong>الاسم</strong>.</li>
-                <li>الرفع يستبدل القائمة الحالية (محلياً وعلى Firebase إن كان مفعّلاً).</li>
-              </ul>
-              <p className="text-white/60 text-xs mt-2">صيغ مقبولة: .xlsx, .xls, .csv — يُقرأ أول شيت فقط.</p>
-            </div>
-          )}
-        </div>
 
         {/* 4 upload icons + رفع بيانات النزلاء (لربط الإيراد بالجوال) */}
         <div className="grid grid-cols-2 gap-4 mb-8">
@@ -627,6 +804,9 @@ export function AdminPage() {
                   const addedCount = merged.length - existing.length
                   setRevenueMapping(merged)
                   setMappingCount(merged.length)
+                  if (useFirestore) {
+                    setRevenueMappingToFirestore(merged).catch(() => { /* toast أو رسالة إن فشل الحفظ في Firebase */ })
+                  }
                   const rawRevenue = getRawRevenue()
                   const rowNote = rawDataRows > 0
                     ? (files.length > 1 ? ` (من ${files.length} ملف، ${rawDataRows.toLocaleString('ar-SA')} صف)` : ` (من ${rawDataRows.toLocaleString('ar-SA')} صف في الملف)`)
@@ -713,18 +893,16 @@ export function AdminPage() {
         {success && <div className="mb-4 p-3 rounded-xl bg-green-500/20 text-green-200 text-sm">{success}</div>}
 
         {/* سجل العضويات الجديدة — مطوي */}
-        <div className="rounded-2xl bg-surface-card border border-white/[0.06] p-4 mb-6 shadow-card">
+        <div id="print-new-members-log" className="rounded-2xl bg-surface-card border border-white/[0.06] p-4 mb-6 shadow-card">
           <button
             type="button"
             onClick={() => setShowNewMembersLog((v) => !v)}
             className="w-full flex items-center gap-2 text-right"
           >
             <span
-              className={`inline-block transition-transform duration-200 ${showNewMembersLog ? 'rotate-180' : ''}`}
+              className={`chevron-toggle ${showNewMembersLog ? 'rotate-180' : ''}`}
               aria-hidden
-            >
-              ▼
-            </span>
+            />
             <h2 className="text-white font-semibold text-[0.9375rem] flex-1">سجل العضويات الجديدة</h2>
             {newMembersLog.length > 0 && (
               <span className="text-white/50 text-xs">({newMembersLog.length})</span>
@@ -735,11 +913,55 @@ export function AdminPage() {
               <p className="text-white/60 text-xs mb-3 mt-3">
                 من سجّلوا من صفحة الضيف (تسجيل مجاني أو عضو جديد). اضغط «تحديث» لرؤية الجدد، وبعد إضافتهم للفضي في الإكسيل ارفع الملف أو امسح السجل.
               </p>
+              {/* فلاتر الفرز — يخفى عند الطباعة */}
+              <div className="mb-3 flex flex-wrap gap-2 items-center print:hidden">
+                <span className="text-white/60 text-xs">فرز:</span>
+                {(['all', 'lastHour', 'lastDay', 'yesterday', 'lastWeek', 'lastMonth', 'custom'] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setNewMembersLogFilter(key)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
+                      newMembersLogFilter === key
+                        ? 'bg-white/15 text-white border border-white/20'
+                        : 'bg-white/5 text-white/80 hover:bg-white/10 border border-white/10'
+                    }`}
+                  >
+                    {key === 'all' && 'الكل'}
+                    {key === 'lastHour' && 'آخر ساعة'}
+                    {key === 'lastDay' && 'آخر يوم'}
+                    {key === 'yesterday' && 'أمس'}
+                    {key === 'lastWeek' && 'الأسبوع الماضي'}
+                    {key === 'lastMonth' && 'الشهر الماضي'}
+                    {key === 'custom' && 'من تاريخ لتاريخ'}
+                  </button>
+                ))}
+                {newMembersLogFilter === 'custom' && (
+                  <span className="flex flex-wrap gap-2 items-center text-xs">
+                    <input
+                      type="date"
+                      value={newMembersLogDateFrom}
+                      onChange={(e) => setNewMembersLogDateFrom(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/40"
+                    />
+                    <span className="text-white/60">إلى</span>
+                    <input
+                      type="date"
+                      value={newMembersLogDateTo}
+                      onChange={(e) => setNewMembersLogDateTo(e.target.value)}
+                      className="px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder-white/40"
+                    />
+                  </span>
+                )}
+              </div>
               {newMembersLog.length === 0 ? (
-                <p className="text-white/50 text-sm">لا يوجد تسجيلات جديدة.</p>
+                <p className="text-white/60 text-sm">لا يوجد تسجيلات جديدة.</p>
+              ) : newMembersLogFiltered.length === 0 ? (
+                <p className="text-white/60 text-sm">لا توجد تسجيلات في النطاق المحدد.</p>
               ) : (
                 <>
-                  <div className="max-h-48 overflow-y-auto rounded-lg bg-white/5 border border-white/10 mb-3">
+                  {/* جدول الشاشة — مع حد «المزيد» */}
+                  <div className="max-h-48 overflow-y-auto rounded-lg bg-white/5 border border-white/10 mb-3 screen-only-new-members-table">
                     <table className="w-full text-right text-sm">
                       <thead className="sticky top-0 bg-surface-card text-white/70">
                         <tr>
@@ -749,18 +971,19 @@ export function AdminPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {newMembersLog.slice(0, newMembersLogLimit).map((entry) => (
+                        {newMembersLogFiltered.slice(0, newMembersLogLimit).map((entry) => (
                           <tr key={entry.id} className="border-t border-white/10">
                             <td className="p-2 text-white/90">{entry.phone}</td>
                             <td className="p-2 text-white/90">{entry.name || '—'}</td>
-                            <td className="p-2 text-white/60 text-xs">
+                            <td className="p-2 text-white/60 text-xs" dir="ltr">
                               {entry.createdAt
-                                ? new Date(entry.createdAt).toLocaleDateString('ar-SA', {
+                                ? new Date(entry.createdAt).toLocaleString('en-GB', {
                                     day: '2-digit',
                                     month: '2-digit',
                                     year: 'numeric',
                                     hour: '2-digit',
                                     minute: '2-digit',
+                                    hour12: true,
                                   })
                                 : '—'}
                             </td>
@@ -769,22 +992,64 @@ export function AdminPage() {
                       </tbody>
                     </table>
                   </div>
-                  {newMembersLogLimit < newMembersLog.length && (
+                  {/* جدول الطباعة فقط — النتائج المفلترة حسب الفلتر الحالي */}
+                  <p className="hidden print-only-new-members-table mb-2 text-sm text-black/80" aria-hidden>
+                    {newMembersLogFilter === 'all' && 'سجل العضويات الجديدة — الكل'}
+                    {newMembersLogFilter === 'lastHour' && 'سجل العضويات الجديدة — آخر ساعة'}
+                    {newMembersLogFilter === 'lastDay' && 'سجل العضويات الجديدة — آخر يوم'}
+                    {newMembersLogFilter === 'yesterday' && 'سجل العضويات الجديدة — أمس'}
+                    {newMembersLogFilter === 'lastWeek' && 'سجل العضويات الجديدة — الأسبوع الماضي'}
+                    {newMembersLogFilter === 'lastMonth' && 'سجل العضويات الجديدة — الشهر الماضي'}
+                    {newMembersLogFilter === 'custom' && `سجل العضويات الجديدة — من ${newMembersLogDateFrom || '...'} إلى ${newMembersLogDateTo || '...'}`}
+                  </p>
+                  <div className="print-only-new-members-table hidden">
+                    <table className="w-full text-right text-sm">
+                      <thead>
+                        <tr>
+                          <th className="p-2 border-b border-black/20">الجوال</th>
+                          <th className="p-2 border-b border-black/20">الاسم</th>
+                          <th className="p-2 border-b border-black/20">التاريخ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {newMembersLogFiltered.map((entry) => (
+                          <tr key={`print-${entry.id}`} className="border-b border-black/10">
+                            <td className="p-2">{entry.phone}</td>
+                            <td className="p-2">{entry.name || '—'}</td>
+                            <td className="p-2 text-xs" dir="ltr">
+                              {entry.createdAt
+                                ? new Date(entry.createdAt).toLocaleString('en-GB', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: true,
+                                  })
+                                : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {newMembersLogLimit < newMembersLogFiltered.length && (
                     <button
                       type="button"
                       onClick={() => setNewMembersLogLimit((n) => n + 10)}
                       className="mb-3 px-3 py-2 rounded-lg bg-white/10 text-white/80 text-sm hover:bg-white/20"
                     >
-                      المزيد ({newMembersLog.length - newMembersLogLimit} متبقي)
+                      المزيد ({newMembersLogFiltered.length - newMembersLogLimit} متبقي)
                     </button>
                   )}
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 print:hidden">
                     <button
                       type="button"
                       onClick={loadNewMembersLog}
-                      className="px-3 py-2 rounded-lg bg-white/10 text-white text-sm hover:bg-white/20"
+                      disabled={refreshingNewMembersLog}
+                      className="px-3 py-2 rounded-lg bg-white/10 text-white text-sm hover:bg-white/20 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      تحديث
+                      {refreshingNewMembersLog ? 'جاري التحديث...' : 'تحديث'}
                     </button>
                     <button
                       type="button"
@@ -794,6 +1059,21 @@ export function AdminPage() {
                     >
                       {clearingLog ? 'جاري...' : 'مسح السجل'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        document.body.classList.add('print-new-members-log')
+                        window.onafterprint = () => {
+                          document.body.classList.remove('print-new-members-log')
+                          window.onafterprint = null
+                        }
+                        window.print()
+                      }}
+                      className="px-3 py-2 rounded-lg bg-white/10 text-white border border-white/20 hover:bg-white/15 text-sm"
+                      title="طباعة سجل العضويات الجديدة (النطاق المفلتر فقط)"
+                    >
+                      طباعة
+                    </button>
                   </div>
                 </>
               )}
@@ -802,63 +1082,86 @@ export function AdminPage() {
         </div>
 
         {/* الإعدادات — مطوية */}
-        <div className="rounded-2xl bg-surface-card border border-white/[0.06] p-4 space-y-4 shadow-card">
+        <div className="mb-6 rounded-2xl bg-surface-card border border-white/[0.06] p-4 space-y-4 shadow-card">
           <button
             type="button"
             onClick={() => setShowSettings((v) => !v)}
             className="w-full flex items-center gap-2 text-right"
           >
             <span
-              className={`inline-block transition-transform duration-200 ${showSettings ? 'rotate-180' : ''}`}
+              className={`chevron-toggle ${showSettings ? 'rotate-180' : ''}`}
               aria-hidden
-            >
-              ▼
-            </span>
+            />
             <h2 className="text-white font-semibold text-[0.9375rem] flex-1">الإعدادات</h2>
           </button>
           {showSettings && (
           <div className="space-y-4 pt-2">
-          <div>
-            <label className="block text-white/70 text-sm mb-1">كل كم ريال = 1 نقطة</label>
-            <input
-              type="number"
-              min={1}
-              value={settings.revenueToPoints || 1}
-              onChange={(e) =>
-                setSettingsState((s) => ({ ...s, revenueToPoints: Number(e.target.value) || 1 }))
-              }
-              className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
-            />
+          {/* ——— إعدادات النقاط والترقية ——— */}
+          <div className="rounded-xl border border-white/10 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setSettingsSections((x) => ({ ...x, points: !x.points }))}
+              className="w-full flex items-center gap-2 p-3 text-right bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              <span className={`chevron-toggle ${settingsSections.points ? 'rotate-180' : ''}`} aria-hidden />
+              <span className="text-white font-medium text-sm flex-1">📊 إعدادات النقاط والترقية</span>
+            </button>
+            {settingsSections.points && (
+            <div className="p-4 pt-0 space-y-4">
+            <div>
+              <label className="block text-white/70 text-sm mb-1">كل كم ريال = 1 نقطة</label>
+              <input
+                type="number"
+                min={1}
+                value={settings.revenueToPoints || 1}
+                onChange={(e) =>
+                  setSettingsState((s) => ({ ...s, revenueToPoints: Number(e.target.value) || 1 }))
+                }
+                className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-white/70 text-sm mb-1">نقاط الترقية: فضي → ذهبي</label>
+              <input
+                type="number"
+                min={0}
+                value={settings.pointsSilverToGold ?? 10000}
+                onChange={(e) =>
+                  setSettingsState((s) => ({ ...s, pointsSilverToGold: Number(e.target.value) || 0 }))
+                }
+                className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-white/70 text-sm mb-1">نقاط الترقية: ذهبي → بلاتيني</label>
+              <input
+                type="number"
+                min={0}
+                value={settings.pointsGoldToPlatinum ?? 12000}
+                onChange={(e) =>
+                  setSettingsState((s) => ({ ...s, pointsGoldToPlatinum: Number(e.target.value) || 0 }))
+                }
+                className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
+              />
+            </div>
+            </div>
+            )}
           </div>
 
-          <div>
-            <label className="block text-white/70 text-sm mb-1">نقاط الترقية: فضي → ذهبي</label>
-            <input
-              type="number"
-              min={0}
-              value={settings.pointsSilverToGold ?? 10000}
-              onChange={(e) =>
-                setSettingsState((s) => ({ ...s, pointsSilverToGold: Number(e.target.value) || 0 }))
-              }
-              className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
-            />
-          </div>
-
-          <div>
-            <label className="block text-white/70 text-sm mb-1">نقاط الترقية: ذهبي → بلاتيني</label>
-            <input
-              type="number"
-              min={0}
-              value={settings.pointsGoldToPlatinum ?? 12000}
-              onChange={(e) =>
-                setSettingsState((s) => ({ ...s, pointsGoldToPlatinum: Number(e.target.value) || 0 }))
-              }
-              className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
-            />
-          </div>
-
-          <div className="border-t border-white/20 pt-5 mt-5">
-            <h3 className="text-white font-semibold text-base mb-3">عجلة الحظ — الجوائز (5 إلى 20)</h3>
+          {/* ——— عجلة الحظ — الجوائز ——— */}
+          <div className="rounded-xl border border-white/10 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setSettingsSections((x) => ({ ...x, prizes: !x.prizes }))}
+              className="w-full flex items-center gap-2 p-3 text-right bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              <span className={`chevron-toggle ${settingsSections.prizes ? 'rotate-180' : ''}`} aria-hidden />
+              <span className="text-white font-medium text-sm flex-1">🎡 عجلة الحظ — الجوائز (5 إلى 20)</span>
+            </button>
+            {settingsSections.prizes && (
+            <div className="p-4 pt-0">
+            <p className="text-white/70 text-sm mb-2 leading-relaxed">حدد عدد مرات المكسب أو اختر عدد لا نهائي لكل جائزة. عند نفاد العدد لا يقع المؤشر عليها.</p>
+            <p className="text-white/60 text-sm mb-4 leading-relaxed">عمود <strong>%</strong> = نسبة الجائزة للتوثيق فقط. العجلة حالياً تعطي كل جائزة فرصة متساوية (١÷عدد الجوائز).</p>
             <p className="text-white/70 text-sm mb-2 leading-relaxed">حدد عدد مرات المكسب أو اختر عدد لا نهائي لكل جائزة. عند نفاد العدد لا يقع المؤشر عليها.</p>
             <p className="text-white/60 text-sm mb-4 leading-relaxed">عمود <strong>%</strong> = نسبة الجائزة للتوثيق فقط. العجلة حالياً تعطي كل جائزة فرصة متساوية (١÷عدد الجوائز).</p>
             {settings.prizes.map((p, idx) => {
@@ -866,7 +1169,7 @@ export function AdminPage() {
               const maxWins = p.maxWins ?? 0
               return (
                 <div key={p.id} className="mb-4 p-4 rounded-xl bg-white/5 border border-white/10">
-                  <div className="flex gap-3 items-center mb-2.5 flex-wrap">
+                  <div className="flex gap-2 sm:gap-3 items-center mb-2.5 flex-wrap">
                     <input
                       type="text"
                       placeholder="اسم الجائزة"
@@ -876,9 +1179,9 @@ export function AdminPage() {
                         next[idx] = { ...next[idx], label: e.target.value }
                         setSettingsState((s) => ({ ...s, prizes: next }))
                       }}
-                      className="flex-1 min-w-[140px] px-4 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white text-sm sm:text-base"
+                      className="flex-1 min-w-0 sm:min-w-[120px] basis-24 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-white/10 border border-white/20 text-white text-sm sm:text-base"
                     />
-                    <div className="flex items-center gap-1" title="نسبة الجائزة % — للتوثيق فقط. العجلة تعطي كل جائزة فرصة متساوية.">
+                    <div className="flex items-center gap-1 flex-shrink-0" title="نسبة الجائزة % — للتوثيق فقط. العجلة تعطي كل جائزة فرصة متساوية.">
                       <button
                         type="button"
                         onClick={() => {
@@ -915,18 +1218,36 @@ export function AdminPage() {
                       </button>
                       <span className="text-white/60 text-sm mr-1">%</span>
                     </div>
-                    {settings.prizes.length > 5 && (
+                    <div className="flex items-center gap-2 flex-shrink-0">
                       <button
                         type="button"
                         onClick={() => {
-                          const next = settings.prizes.filter((_, i) => i !== idx)
+                          const next = [...settings.prizes]
+                          next[idx] = { ...next[idx], percentPinned: !next[idx].percentPinned }
                           setSettingsState((s) => ({ ...s, prizes: next }))
                         }}
-                        className="px-3 py-2 rounded-lg bg-red-500/30 text-red-200 text-sm"
+                        title={p.percentPinned ? 'إلغاء التثبيت — النسبة ستتأثر بتوزيع الباقي' : 'تثبيت النسبة — تغيير باقي الجوائز لا يؤثر على هذه'}
+                        className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm whitespace-nowrap ${
+                          p.percentPinned
+                            ? 'bg-white/15 text-white border border-white/25'
+                            : 'bg-white/10 text-white/80 hover:bg-white/15 border border-white/20'
+                        }`}
                       >
-                        حذف
+                        {p.percentPinned ? 'مثبتة' : 'تثبيت'}
                       </button>
-                    )}
+                      {settings.prizes.length > 5 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = settings.prizes.filter((_, i) => i !== idx)
+                            setSettingsState((s) => ({ ...s, prizes: next }))
+                          }}
+                          className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg bg-red-500/30 text-red-200 text-xs sm:text-sm whitespace-nowrap"
+                        >
+                          حذف
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="flex gap-4 items-center flex-wrap text-sm sm:text-base">
                     <label className="flex items-center gap-2 text-white/80 cursor-pointer text-sm sm:text-base">
@@ -955,7 +1276,7 @@ export function AdminPage() {
                             setSettingsState((s) => ({ ...s, prizes: next }))
                           }}
                           placeholder="8"
-                          className="w-20 px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white text-sm sm:text-base"
+                          className="input-no-spinner w-14 px-2 py-1.5 rounded-lg bg-white/10 border border-white/20 text-white text-sm text-center tabular-nums"
                         />
                         <span className="text-white/50 text-sm sm:text-base">مستخدم {usage} من {maxWins || 0}</span>
                       </>
@@ -977,9 +1298,58 @@ export function AdminPage() {
                 + إضافة جائزة
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => {
+                const confirmed = window.confirm(
+                  'هل تريد استعادة الإعدادات الافتراضية؟ (صيغ الرسائل، رقم الواتساب، نقاط الترقية، وجميع الإعدادات أسفل الجوائز)\n\nالجوائز الحالية لن تتغير.'
+                )
+                if (!confirmed) return
+                setError('')
+                const next: Settings = {
+                  ...settings,
+                  revenueToPoints: defaultSettings.revenueToPoints,
+                  pointsSilverToGold: defaultSettings.pointsSilverToGold,
+                  pointsGoldToPlatinum: defaultSettings.pointsGoldToPlatinum,
+                  whatsAppNumber: defaultSettings.whatsAppNumber,
+                  instagramUrl: defaultSettings.instagramUrl ?? '',
+                  exportWebhookUrl: defaultSettings.exportWebhookUrl,
+                  checkEligibilityUrl: defaultSettings.checkEligibilityUrl,
+                  messages: { ...defaultSettings.messages },
+                }
+                setSettingsState(next)
+                setSettings(next)
+                if (useFirestore) {
+                  writeSettingsToFirestore(next).then(() => {
+                    setSuccess('تم استعادة الإعدادات الافتراضية (صيغ الرسائل، واتساب، وغيرها)')
+                    setTimeout(() => setSuccess(''), 3000)
+                  }).catch(() => setError('فشل حفظ الإعدادات الافتراضية على Firebase'))
+                } else {
+                  setSuccess('تم استعادة الإعدادات الافتراضية')
+                  setTimeout(() => setSuccess(''), 3000)
+                }
+              }}
+              className="mt-3 block w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white/10 text-white border border-white/20 hover:bg-white/15 text-sm sm:text-base"
+            >
+              الإعدادات الافتراضية
+            </button>
+            </div>
+            )}
           </div>
 
-          <div>
+          {/* ——— التواصل والروابط ——— */}
+          <div className="rounded-xl border border-white/10 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setSettingsSections((x) => ({ ...x, contact: !x.contact }))}
+              className="w-full flex items-center gap-2 p-3 text-right bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              <span className={`chevron-toggle ${settingsSections.contact ? 'rotate-180' : ''}`} aria-hidden />
+              <span className="text-white font-medium text-sm flex-1">📱 التواصل والروابط</span>
+            </button>
+            {settingsSections.contact && (
+            <div className="p-4 pt-0 space-y-4">
+            <div>
             <label className="block text-white/70 text-sm mb-1">رقم واتساب الاستقبال (بدون +)</label>
             <input
               type="tel"
@@ -1016,8 +1386,23 @@ export function AdminPage() {
               placeholder="https://script.google.com/... أو Web App URL"
               className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40"
             />
+            </div>
+            </div>
+            )}
           </div>
 
+          {/* ——— صيغ الرسائل ——— */}
+          <div className="rounded-xl border border-white/10 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setSettingsSections((x) => ({ ...x, messages: !x.messages }))}
+              className="w-full flex items-center gap-2 p-3 text-right bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              <span className={`chevron-toggle ${settingsSections.messages ? 'rotate-180' : ''}`} aria-hidden />
+              <span className="text-white font-medium text-sm flex-1">💬 صيغ الرسائل</span>
+            </button>
+            {settingsSections.messages && (
+            <div className="p-4 pt-0 space-y-4">
           <div>
             <label className="block text-white/70 text-sm mb-1">رسالة الفضي (استخدم {`{name}`} و {`{points}`} و {`{next}`})</label>
             <textarea
@@ -1092,15 +1477,28 @@ export function AdminPage() {
               className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
             />
           </div>
-
-          <button
-            type="button"
-            onClick={handleSaveSettings}
-            className="w-full py-3 rounded-xl bg-accent text-white font-medium hover:bg-accent-hover transition-colors"
-          >
-            حفظ الإعدادات
-          </button>
+            </div>
+            )}
           </div>
+          </div>
+          )}
+
+          {/* شريط ثابت أسفل الشاشة عند فتح الإعدادات — يظهر فوق المحتوى عند التمرير */}
+          {showSettings && (
+            <div
+              className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-surface-card/95 backdrop-blur-sm border-t border-white/20 shadow-[0_-4px_20px_rgba(0,0,0,0.3)] safe-area-insets"
+              style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+            >
+              <div className="w-full max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl mx-auto">
+                <button
+                  type="button"
+                  onClick={handleSaveSettings}
+                  className="w-full py-3 rounded-xl bg-accent text-white font-medium hover:bg-accent-hover transition-colors"
+                >
+                  حفظ الإعدادات
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
@@ -1112,11 +1510,9 @@ export function AdminPage() {
             className="w-full flex items-center gap-2 text-right"
           >
             <span
-              className={`inline-block transition-transform duration-200 ${showQRPrint ? 'rotate-180' : ''}`}
+              className={`chevron-toggle ${showQRPrint ? 'rotate-180' : ''}`}
               aria-hidden
-            >
-              ▼
-            </span>
+            />
             <h2 className="text-white font-semibold text-[0.9375rem] flex-1">📱 QR للطباعة — عجلة الحظ</h2>
           </button>
           {showQRPrint && (
@@ -1143,7 +1539,7 @@ export function AdminPage() {
                   </div>
                 </div>
                 <p className="text-[#666] text-xs mt-4">امسح الكود لفتح صفحة العجلة</p>
-                <div className="mt-4 flex flex-row justify-center gap-3 print:hidden">
+                <div className="mt-4 flex flex-row justify-center gap-4 print:hidden">
                   <button
                     type="button"
                     onClick={() => {
@@ -1154,14 +1550,15 @@ export function AdminPage() {
                       const url = URL.createObjectURL(blob)
                       const img = new Image()
                       img.onload = () => {
+                        const size = 1200
                         const c = document.createElement('canvas')
-                        c.width = img.width
-                        c.height = img.height
+                        c.width = size
+                        c.height = size
                         const ctx = c.getContext('2d')
                         if (ctx) {
-                          ctx.fillStyle = '#fff'
-                          ctx.fillRect(0, 0, c.width, c.height)
-                          ctx.drawImage(img, 0, 0)
+                          ctx.fillStyle = '#ffffff'
+                          ctx.fillRect(0, 0, size, size)
+                          ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, size, size)
                           const a = document.createElement('a')
                           a.href = c.toDataURL('image/png')
                           a.download = 'qr-ajalat-alhaz.png'
@@ -1171,7 +1568,7 @@ export function AdminPage() {
                       }
                       img.src = url
                     }}
-                    className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-primary-500/20 text-primary-500 border border-primary-500/40 hover:bg-primary-500/30 transition-colors"
+                    className="flex flex-col items-center gap-1 min-w-[7rem] px-5 py-3 rounded-xl bg-gray-100 text-gray-800 border-2 border-gray-300 hover:bg-gray-200 hover:border-gray-400 transition-colors shadow-sm"
                     title="تحميل"
                   >
                     <span className="text-xl" aria-hidden>⬇</span>
@@ -1180,7 +1577,7 @@ export function AdminPage() {
                   <button
                     type="button"
                     onClick={() => window.print()}
-                    className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-primary-500/20 text-primary-500 border border-primary-500/40 hover:bg-primary-500/30 transition-colors"
+                    className="flex flex-col items-center gap-1 min-w-[7rem] px-5 py-3 rounded-xl bg-gray-100 text-gray-800 border-2 border-gray-300 hover:bg-gray-200 hover:border-gray-400 transition-colors shadow-sm"
                     title="طباعة A4"
                   >
                     <span className="text-xl" aria-hidden>🖨</span>
@@ -1239,9 +1636,9 @@ export function AdminPage() {
                       <p className="text-white/60 text-xs">نزلاء فريدون في الملف</p>
                       <p className="text-white font-bold text-xl">{duplicateReport.revenueParsedCount}</p>
                     </div>
-                    <div className="p-3 rounded-xl bg-primary-500/20 border border-primary-500/30">
-                      <p className="text-primary-400/80 text-xs">تم الربط برقم جوال</p>
-                      <p className="text-primary-400 font-bold text-xl">{duplicateReport.totalRows}</p>
+                    <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                      <p className="text-white/60 text-xs">تم الربط برقم جوال</p>
+                      <p className="text-white font-bold text-xl">{duplicateReport.totalRows}</p>
                     </div>
                     {duplicateReport.revenueTierBreakdown && duplicateReport.revenueTierBreakdown.silver + duplicateReport.revenueTierBreakdown.gold + duplicateReport.revenueTierBreakdown.platinum + duplicateReport.revenueTierBreakdown.notInTier > 0 && (
                       <div className="p-3 rounded-xl bg-white/5 border border-white/10 col-span-2">
@@ -1277,13 +1674,13 @@ export function AdminPage() {
                     )}
                   </>
                 )}
-                <div className="p-3 rounded-xl bg-primary-500/20 border border-primary-500/30">
-                  <p className="text-primary-400/80 text-xs">تم رفع</p>
-                  <p className="text-primary-400 font-bold text-xl">{duplicateReport.uploaded}</p>
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                  <p className="text-white/60 text-xs">تم رفع</p>
+                  <p className="text-white font-bold text-xl">{duplicateReport.uploaded}</p>
                 </div>
-                <div className="p-3 rounded-xl bg-amber-500/20 border border-amber-500/30">
-                  <p className="text-amber-400/80 text-xs">صفوف مكررة (نفس الجوال)</p>
-                  <p className="text-amber-400 font-bold text-xl">{duplicateReport.duplicateCount}</p>
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                  <p className="text-white/60 text-xs">صفوف مكررة (نفس الجوال)</p>
+                  <p className="text-white font-bold text-xl">{duplicateReport.duplicateCount}</p>
                 </div>
               </div>
 
@@ -1316,7 +1713,7 @@ export function AdminPage() {
               <button
                 type="button"
                 onClick={() => setDuplicateReport(null)}
-                className="w-full py-2.5 rounded-xl bg-primary-500/30 text-primary-400 font-medium hover:bg-primary-500/40 transition-colors"
+                className="w-full py-2.5 rounded-xl bg-white/10 text-white font-medium border border-white/20 hover:bg-white/15 transition-colors"
               >
                 تم
               </button>

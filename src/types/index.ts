@@ -7,6 +7,8 @@ export interface Prize {
   maxWins?: number
   /** true = الجائزة لا تنتهي (عدد لا نهائي من المرات) */
   unlimited?: boolean
+  /** true = النسبة ثابتة — عند تغيير نسب أخرى تُوزَّع الباقي بين غير المثبتة فقط */
+  percentPinned?: boolean
 }
 
 export type Tier = 'silver' | 'gold' | 'platinum'
