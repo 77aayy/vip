@@ -193,7 +193,7 @@ export function Wheel({
     const start = performance.now()
     const startRot = rotation
     const totalDelta = totalRotation - startRot
-    const durationMaxMs = 2240
+    const durationMaxMs = 1120
     // Cubic-Bezier(0.1, 0, 0, 1) — حركة مرنة، النزيل لا ينتظر أكثر من ~3 ثوانٍ
     const run = (now: number) => {
       const elapsed = now - start
