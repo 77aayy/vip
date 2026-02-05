@@ -5,7 +5,6 @@ export const defaultPrizes: Prize[] = [
   { id: '3', label: 'مشروب مجاني', percent: 6.67, unlimited: true },
   { id: '4', label: 'ترقية غرفة', percent: 6.67, maxWins: 8 },
   { id: '5', label: 'وجبة إفطار', percent: 6.67, unlimited: true },
-  { id: '6', label: 'وجبة غداء', percent: 6.67, unlimited: true },
   { id: '7', label: 'ليلة مجانية', percent: 6.67, unlimited: true },
   { id: '8', label: 'خصم 15%', percent: 6.67, unlimited: true },
   { id: '9', label: 'جناح بالورود', percent: 6.67, unlimited: true },
@@ -14,7 +13,6 @@ export const defaultPrizes: Prize[] = [
   { id: '12', label: 'خروج متأخر', percent: 6.67, unlimited: true },
   { id: '14', label: '٢+١ ليلة', percent: 6.67, unlimited: true },
   { id: '15', label: 'ليلة + ليلة', percent: 6.67, unlimited: true },
-  { id: '16', label: 'إليت فضيّ', percent: 6.64, unlimited: true },
 ]
 
 export const defaultSettings: Settings = {
