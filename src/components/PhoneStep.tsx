@@ -19,7 +19,7 @@ interface PhoneStepProps {
   whatsAppNumber: string
   registerPrompt: string
   successReception: string
-  messages: { silver: string; gold: string; platinum: string }
+  messages: { silver: string; gold: string; platinum: string; eligibleNoTier?: string }
   onSuccessSound?: () => void
   /** رابط انستجرام (أو سوشال) يظهر بعد النجاح — "تابعنا للاطلاع على عروضنا" */
   instagramUrl?: string
@@ -139,9 +139,10 @@ export function PhoneStep({
   function handleTierWhatsApp() {
     if (!guest || tierWhatsAppSentRef.current) return
     tierWhatsAppSentRef.current = true
-    const tierDisplay = tierLabel[guest.tier]
+    const tierDisplay = guest.inTier !== false ? tierLabel[guest.tier] : `مؤهل لفئة ${tierLabel[guest.tier]}`
+    const nameDisplay = guest.name?.trim() || 'ضيف'
     const idDisplay = guest.idLastDigits ? `آخر 4 أرقام: ${guest.idLastDigits}` : '-'
-    sendWhatsApp(guest.name, guest.phone, tierDisplay, '', prizeLabel, code, idDisplay)
+    sendWhatsApp(nameDisplay, guest.phone, tierDisplay, '', prizeLabel, code, idDisplay)
     setStep('sent')
     onSuccess()
   }
@@ -199,25 +200,20 @@ export function PhoneStep({
   }
 
   if (step === 'tier' && guest) {
-    const msg = messages[guest.tier]
-    const displayMsg = msg
-      .replace(/\{points\}/g, String(guest.points))
-      .replace(/\{next\}/g, guest.pointsNextThreshold != null ? String(guest.pointsNextThreshold) : '')
+    const inTier = guest.inTier !== false
+    const eligibleTierLabel = tierLabel[guest.tier]
+    const msg = inTier ? messages[guest.tier] : (messages.eligibleNoTier ?? 'أنت مؤهل لفئة {eligibleTier}. ندعوك لتجربة العجلة!')
+    const displayMsg = inTier
+      ? msg.replace(/\{name\}/g, guest.name?.trim() || '').replace(/\{points\}/g, String(guest.points)).replace(/\{next\}/g, guest.pointsNextThreshold != null ? String(guest.pointsNextThreshold) : '')
+      : msg.replace(/\{totalSpent\}/g, String(guest.totalSpent ?? guest.points)).replace(/\{eligibleTier\}/g, eligibleTierLabel)
 
     return (
       <div className="w-full max-w-sm mx-auto py-6 animate-fade-in">
         <div className="rounded-2xl p-5 space-y-3 shadow-lg" style={cardStyle}>
           <div className="rounded-xl p-3.5 text-center border-2 bg-amber-50/85" style={{ borderColor: 'rgba(217,119,6,0.55)' }}>
-            <p className="font-medium text-[0.9375rem] mb-0.5" style={textStyle}>
-            {guest.tier === 'silver'
-              ? (guest.name?.trim()
-                  ? `بداية فخمة يا ${guest.name.trim()}.. الان انت عضوية فضية .. والذهب بانتظارك! ✨`
-                  : 'بداية فخمة الان انت عضويه فضية .. والذهب بانتظارك! ✨')
-              : (guest.name?.trim()
-                  ? `يا ${guest.name.trim()}، فئتك: ${tierLabel[guest.tier]}`
-                  : `فئتك: ${tierLabel[guest.tier]}`)}
-          </p>
-            <p className="text-[0.8125rem]" style={mutedStyle}>{displayMsg}</p>
+            <p className="font-medium text-[0.9375rem] leading-relaxed" style={textStyle}>
+              {displayMsg}
+            </p>
           </div>
           <div className="rounded-xl py-3 px-4 border-2 bg-amber-50/85" style={{ borderColor: 'rgba(217,119,6,0.55)' }}>
             <p className="text-center font-mono font-semibold text-[1rem] tracking-widest" style={textStyle}>{code}</p>
@@ -352,7 +348,7 @@ export function PhoneStep({
           <span className="text-2xl" aria-hidden>🎊</span>
         </div>
         <p className="text-[1.0625rem] font-bold leading-relaxed text-[#2c2825]" style={{ fontFamily: 'Tajawal, Cairo, sans-serif' }}>
-          {successReception}
+          {successReception.replace(/\{name\}/g, (guest?.name || name || '').trim())}
         </p>
         {instagramUrl?.trim() && (
           <a

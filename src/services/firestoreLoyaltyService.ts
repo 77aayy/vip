@@ -8,11 +8,13 @@ import {
   writeBatch,
   getDoc,
   getDocs,
+  getCountFromServer,
   setDoc,
   addDoc,
   deleteDoc,
 } from 'firebase/firestore'
 import { firestoreDb } from './firebase'
+import { trackReads, trackWrites } from './firestoreUsageTracker'
 import type { MemberRow, RevenueRow, Settings, GuestLookup, Tier } from '@/types'
 import { defaultSettings } from './mockSettings'
 
@@ -47,11 +49,14 @@ async function clearCollection(colId: string): Promise<void> {
   if (!firestoreDb) return
   const colRef = collection(firestoreDb, colId)
   const snap = await getDocs(colRef)
+  trackReads(snap.size)
   const refs = snap.docs.map((d) => d.ref)
   for (let i = 0; i < refs.length; i += BATCH_SIZE) {
+    const chunk = refs.slice(i, i + BATCH_SIZE)
     const batch = writeBatch(firestoreDb)
-    refs.slice(i, i + BATCH_SIZE).forEach((ref) => batch.delete(ref))
+    chunk.forEach((ref) => batch.delete(ref))
     await batch.commit()
+    trackWrites(chunk.length)
   }
 }
 
@@ -77,13 +82,14 @@ export async function checkFirebaseConnection(): Promise<FirebaseCheckResult> {
     return {
       configOk: false,
       firestoreStatus: 'error',
-      message: 'ملف .env ناقص أو مفاتيح Firebase غير موجودة (VITE_FIREBASE_*)',
+      message: 'ملف .env ناقص أو مفاتيح Firebase غير موجودة (VITE_FIREBASE_*). السبب: لم يتم العثور على VITE_FIREBASE_API_KEY أو VITE_FIREBASE_PROJECT_ID. الحل: انسخ .env.example إلى .env واملأ القيم من Firebase Console → Project Settings → Your apps.',
       projectId: projectId || null,
     }
   }
   try {
     const ref = doc(firestoreDb, 'config', 'settings')
     await getDoc(ref)
+    trackReads(1)
     return {
       configOk: true,
       firestoreStatus: 'ok',
@@ -98,7 +104,7 @@ export async function checkFirebaseConnection(): Promise<FirebaseCheckResult> {
       return {
         configOk: true,
         firestoreStatus: 'permission-denied',
-        message: 'الصلاحيات مرفوضة — رفع ملف firestore.rules (npx firebase deploy --only firestore) أو تفعيل وضع Test في Console.',
+        message: 'السبب: قواعد Firestore تمنع القراءة. الحل: نفّذ npx firebase deploy --only firestore لرفع firestore.rules، أو من Firebase Console → Firestore → Rules فعّل وضع Test مؤقتاً.',
         projectId,
       }
     }
@@ -111,14 +117,30 @@ export async function checkFirebaseConnection(): Promise<FirebaseCheckResult> {
       return {
         configOk: true,
         firestoreStatus: 'database-disabled',
-        message: 'Firestore غير مفعّل — من Firebase Console: Build → Firestore Database → Create database.',
+        message: 'السبب: Firestore غير مُنشأ في المشروع. الحل: من Firebase Console → Build → Firestore Database → Create database (اختر وضع production أو test).',
+        projectId,
+      }
+    }
+    if (msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('resource-exhausted') || code === 'resource-exhausted') {
+      return {
+        configOk: true,
+        firestoreStatus: 'error',
+        message: `السبب: نفاد الحصة المجانية (50K قراءة، 20K كتابة يومياً). الحل: انتظر حتى اليوم التالي أو ترقية الخطة في Firebase Console → Usage and billing.`,
+        projectId,
+      }
+    }
+    if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('fetch')) {
+      return {
+        configOk: true,
+        firestoreStatus: 'error',
+        message: `السبب: عدم اتصال بالإنترنت أو حظر من الشبكة. الحل: تحقق من الاتصال، أو جرب شبكة أخرى، أو تعطيل VPN إن كان مفعّلاً. التفاصيل: ${code || msg.slice(0, 60)}`,
         projectId,
       }
     }
     return {
       configOk: true,
       firestoreStatus: 'error',
-      message: `خطأ اتصال: ${code || msg.slice(0, 80)}`,
+      message: `السبب: ${code || 'خطأ غير معروف'}. التفاصيل: ${msg.slice(0, 100)}. الحل: تحقق من Firebase Console و firestore.rules.`,
       projectId,
     }
   }
@@ -140,9 +162,11 @@ export async function writeSilverBatch(rows: MemberRow[]): Promise<void> {
         name: r.name ?? '',
         total_spent: r.total_spent ?? 0,
         ...(r.idLastDigits != null && r.idLastDigits !== '' && { idLastDigits: r.idLastDigits }),
+        ...(r.idNumber != null && r.idNumber !== '' && { idNumber: r.idNumber }),
       })
     }
     await batch.commit()
+    trackWrites(chunk.length)
   }
 }
 
@@ -162,9 +186,11 @@ export async function writeGoldBatch(rows: MemberRow[]): Promise<void> {
         name: r.name ?? '',
         total_spent: r.total_spent ?? 0,
         ...(r.idLastDigits != null && r.idLastDigits !== '' && { idLastDigits: r.idLastDigits }),
+        ...(r.idNumber != null && r.idNumber !== '' && { idNumber: r.idNumber }),
       })
     }
     await batch.commit()
+    trackWrites(chunk.length)
   }
 }
 
@@ -184,9 +210,11 @@ export async function writePlatinumBatch(rows: MemberRow[]): Promise<void> {
         name: r.name ?? '',
         total_spent: r.total_spent ?? 0,
         ...(r.idLastDigits != null && r.idLastDigits !== '' && { idLastDigits: r.idLastDigits }),
+        ...(r.idNumber != null && r.idNumber !== '' && { idNumber: r.idNumber }),
       })
     }
     await batch.commit()
+    trackWrites(chunk.length)
   }
 }
 
@@ -204,6 +232,7 @@ export async function writeRevenueBatch(rows: RevenueRow[]): Promise<void> {
       batch.set(doc(colRef, id), { phone: r.phone, total_spent: r.total_spent ?? 0 })
     }
     await batch.commit()
+    trackWrites(chunk.length)
   }
 }
 
@@ -212,6 +241,7 @@ export async function writeSettings(settings: Settings): Promise<void> {
   if (!firestoreDb) return
   const ref = doc(firestoreDb, COL_CONFIG, DOC_SETTINGS)
   await setDoc(ref, settings)
+  trackWrites(1)
 }
 
 /** جلب الإعدادات من Firestore. */
@@ -219,6 +249,7 @@ export async function getSettingsAsync(): Promise<Settings> {
   if (!firestoreDb) return defaultSettings
   const ref = doc(firestoreDb, COL_CONFIG, DOC_SETTINGS)
   const snap = await getDoc(ref)
+  trackReads(1)
   if (!snap.exists()) return defaultSettings
   const data = snap.data() as Settings
   return {
@@ -243,11 +274,13 @@ export async function getMemberByPhoneAsync(phone: string): Promise<GuestLookup 
     getDoc(doc(firestoreDb, COL_SILVER, p)),
     getDoc(doc(firestoreDb, COL_REVENUE, p)),
   ])
+  trackReads(4)
 
   let tier: Tier
   let name: string
   let idLastDigits: string | undefined
 
+  let inTier = true
   if (platSnap.exists()) {
     const d = platSnap.data()
     tier = 'platinum'
@@ -264,7 +297,15 @@ export async function getMemberByPhoneAsync(phone: string): Promise<GuestLookup 
     name = (d.name as string) ?? ''
     idLastDigits = d.idLastDigits as string | undefined
   } else {
-    return null
+    const rev = revSnap.exists() ? (revSnap.data().total_spent as number) ?? 0 : 0
+    if (rev <= 0) return null
+    inTier = false
+    tier = rev / (settings.revenueToPoints || 1) >= (settings.pointsSilverToGold ?? 10000) + (settings.pointsGoldToPlatinum ?? 12000)
+      ? 'platinum'
+      : rev / (settings.revenueToPoints || 1) >= (settings.pointsSilverToGold ?? 10000)
+        ? 'gold'
+        : 'silver'
+    name = ''
   }
 
   const rev = revSnap.exists() ? (revSnap.data().total_spent as number) ?? 0 : 0
@@ -291,10 +332,13 @@ export async function getMemberByPhoneAsync(phone: string): Promise<GuestLookup 
     pointsToNextTier: pointsToNextTier === 0 ? null : pointsToNextTier,
     pointsNextThreshold,
     ...(idLastDigits != null && idLastDigits !== '' && { idLastDigits }),
+    inTier,
+    ...(rev > 0 && { totalSpent: rev }),
+    ...(!inTier && { eligibleTier: tier }),
   }
 }
 
-/** عدد السجلات في كل مجموعة (للأدمن). */
+/** عدد السجلات في كل مجموعة (للأدمن) — باستخدام getCountFromServer لتوفير القراءات (٤ بدل عشرات الآلاف). */
 export async function getCountsAsync(): Promise<{
   silver: number
   gold: number
@@ -305,16 +349,17 @@ export async function getCountsAsync(): Promise<{
     return { silver: 0, gold: 0, platinum: 0, revenue: 0 }
   }
   const [silverSnap, goldSnap, platinumSnap, revenueSnap] = await Promise.all([
-    getDocs(collection(firestoreDb, COL_SILVER)),
-    getDocs(collection(firestoreDb, COL_GOLD)),
-    getDocs(collection(firestoreDb, COL_PLATINUM)),
-    getDocs(collection(firestoreDb, COL_REVENUE)),
+    getCountFromServer(collection(firestoreDb, COL_SILVER)),
+    getCountFromServer(collection(firestoreDb, COL_GOLD)),
+    getCountFromServer(collection(firestoreDb, COL_PLATINUM)),
+    getCountFromServer(collection(firestoreDb, COL_REVENUE)),
   ])
+  trackReads(4)
   return {
-    silver: silverSnap.size,
-    gold: goldSnap.size,
-    platinum: platinumSnap.size,
-    revenue: revenueSnap.size,
+    silver: silverSnap.data().count,
+    gold: goldSnap.data().count,
+    platinum: platinumSnap.data().count,
+    revenue: revenueSnap.data().count,
   }
 }
 
@@ -323,6 +368,7 @@ export async function getPrizeUsageAsync(): Promise<Record<string, number>> {
   if (!firestoreDb) return {}
   const ref = doc(firestoreDb, COL_CONFIG, DOC_PRIZE_USAGE)
   const snap = await getDoc(ref)
+  trackReads(1)
   if (!snap.exists()) return {}
   const data = snap.data()
   return (data?.usage as Record<string, number>) ?? {}
@@ -333,9 +379,11 @@ export async function incrementPrizeUsageAsync(prizeId: string): Promise<void> {
   if (!firestoreDb) return
   const ref = doc(firestoreDb, COL_CONFIG, DOC_PRIZE_USAGE)
   const snap = await getDoc(ref)
+  trackReads(1)
   const current = (snap.exists() ? (snap.data()?.usage as Record<string, number>) : {}) ?? {}
   const next = { ...current, [prizeId]: (current[prizeId] ?? 0) + 1 }
   await setDoc(ref, { usage: next })
+  trackWrites(1)
 }
 
 /** إضافة عضو فضية واحد (عند تسجيل جديد من صفحة الضيف). */
@@ -349,6 +397,7 @@ export async function addSilverMemberAsync(
   if (!p) return
   const ref = doc(firestoreDb, COL_SILVER, p)
   const snap = await getDoc(ref)
+  trackReads(1)
   if (snap.exists()) {
     const data = snap.data()
     await setDoc(ref, {
@@ -357,6 +406,7 @@ export async function addSilverMemberAsync(
       ...(idLastDigits != null &&
         idLastDigits !== '' && { idLastDigits: idLastDigits.replace(/\D/g, '').slice(-4) }),
     })
+    trackWrites(1)
     return
   }
   await setDoc(ref, {
@@ -366,6 +416,7 @@ export async function addSilverMemberAsync(
     ...(idLastDigits != null &&
       idLastDigits !== '' && { idLastDigits: idLastDigits.replace(/\D/g, '').slice(-4) }),
   })
+  trackWrites(1)
   await logNewMemberAsync(phone, name.trim(), idLastDigits)
 }
 
@@ -383,6 +434,7 @@ async function logNewMemberAsync(
     ...(idLastDigits != null && idLastDigits !== '' && { idLastDigits: idLastDigits.replace(/\D/g, '').slice(-4) }),
     createdAt: Date.now(),
   })
+  trackWrites(1)
 }
 
 /** جلب سجل العضويات الجديدة (الأحدث أولاً). */
@@ -390,6 +442,7 @@ export async function getNewMembersLogAsync(): Promise<NewMemberLogEntry[]> {
   if (!firestoreDb) return []
   const colRef = collection(firestoreDb, COL_NEW_MEMBERS)
   const snap = await getDocs(colRef)
+  trackReads(snap.size)
   const list: NewMemberLogEntry[] = snap.docs.map((d) => {
     const data = d.data()
     return {
@@ -409,5 +462,38 @@ export async function clearNewMembersLogAsync(): Promise<void> {
   if (!firestoreDb) return
   const colRef = collection(firestoreDb, COL_NEW_MEMBERS)
   const snap = await getDocs(colRef)
+  trackReads(snap.size)
+  trackWrites(snap.size)
   await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)))
+}
+
+/** جلب قائمة الزبائن (فضي+ذهبي+بلاتيني) لربط كشف الإيراد برقم الجوال — phone + idNumber + name + tier */
+export async function getMembersForRevenueResolveAsync(): Promise<
+  { phone: string; idNumber?: string; name?: string; tier?: Tier }[]
+> {
+  if (!firestoreDb) return []
+  const [silverSnap, goldSnap, platinumSnap] = await Promise.all([
+    getDocs(collection(firestoreDb, COL_SILVER)),
+    getDocs(collection(firestoreDb, COL_GOLD)),
+    getDocs(collection(firestoreDb, COL_PLATINUM)),
+  ])
+  trackReads(silverSnap.size + goldSnap.size + platinumSnap.size)
+  const out: { phone: string; idNumber?: string; name?: string; tier?: Tier }[] = []
+  const pairs: [typeof silverSnap, Tier][] = [
+    [silverSnap, 'silver'],
+    [goldSnap, 'gold'],
+    [platinumSnap, 'platinum'],
+  ]
+  for (const [snap, tier] of pairs) {
+    for (const d of snap.docs) {
+      const data = d.data()
+      const phone = (data.phone as string) ?? ''
+      const idNumber = (data.idNumber as string) ?? undefined
+      const name = (data.name as string) ?? undefined
+      if (phone && phone.length >= 9) {
+        out.push({ phone: norm(phone), ...(idNumber && { idNumber }), ...(name && { name }), tier })
+      }
+    }
+  }
+  return out
 }

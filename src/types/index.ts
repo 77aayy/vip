@@ -22,6 +22,12 @@ export interface GuestLookup {
   pointsNextThreshold: number | null
   /** آخر 2–4 أرقام من الهوية (للعرض المقنّع: هل رقم هويتك المنتهي بـ ***45؟) */
   idLastDigits?: string
+  /** true = مسجل في فئة (فضي/ذهبي/بلاتيني). false = له إيراد فقط ولم يسجل بعد */
+  inTier?: boolean
+  /** المبلغ الإجمالي المنفق (للعرض عند inTier: false) */
+  totalSpent?: number
+  /** الفئة المستحقة بناءً على النقاط (عند inTier: false) */
+  eligibleTier?: Tier
 }
 
 export interface Settings {
@@ -42,6 +48,8 @@ export interface Settings {
     platinum: string
     registerPrompt: string
     successReception: string
+    /** للضيف له إيراد ولكن لم يسجل بعد */
+    eligibleNoTier?: string
   }
 }
 
@@ -51,11 +59,15 @@ export interface MemberRow {
   total_spent: number
   /** آخر 2–4 أرقام من الهوية (اختياري، للتأكيد المقنّع عند العودة) */
   idLastDigits?: string
+  /** رقم الهوية الكامل — لربط كشف الإيراد بالزبون */
+  idNumber?: string
 }
 
 export interface RevenueRow {
   phone: string
   total_spent: number
+  /** رقم الهوية — عند الاستيراد قبل تحويله إلى phone */
+  idNumber?: string
 }
 
 export interface StoredData {

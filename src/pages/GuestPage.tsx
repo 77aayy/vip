@@ -260,15 +260,16 @@ export function GuestPage() {
     silver: settings.messages.silver,
     gold: settings.messages.gold,
     platinum: settings.messages.platinum,
+    eligibleNoTier: settings.messages.eligibleNoTier ?? 'بلغ إجمالي تعاملاتك معنا {totalSpent} ريالاً، وأنت مؤهل لفئة {eligibleTier}. ندعوك لتجربة العجلة!',
   }
 
   return (
-    <div className="min-h-screen-dvh flex flex-col overflow-x-hidden page-bg-leather">
-      <main className="relative z-10 flex-1 flex flex-col items-center safe-area-insets pt-3 pb-4 sm:pt-6 sm:pb-10 px-3 sm:px-4">
-        <div className="w-full max-w-[432px] min-w-0 mx-auto flex flex-col items-center" style={{ width: '100%' }}>
-        <header className="w-full mb-3 sm:mb-6">
+    <div className="min-h-[100dvh] flex flex-col overflow-x-hidden page-bg-leather sm:min-h-screen">
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center min-h-0 safe-area-insets pt-2 pb-6 px-2 sm:pt-6 sm:pb-10 sm:px-4">
+        <div className="w-full max-w-[432px] min-w-0 mx-auto flex flex-col items-center">
+        <header className="w-full flex-shrink-0 mb-2 sm:mb-6">
           <div
-            className="w-full flex flex-row items-center gap-2 sm:gap-3 px-3 py-2.5 sm:px-4 sm:py-3.5 rounded-2xl"
+            className="w-full flex flex-row items-center gap-2 sm:gap-3 px-2 py-2 sm:px-4 sm:py-3.5 rounded-xl sm:rounded-2xl"
             dir="rtl"
             style={{
               background: 'linear-gradient(145deg, rgba(255,255,255,0.85) 0%, rgba(248,248,246,0.6) 100%)',
@@ -286,9 +287,8 @@ export function GuestPage() {
               <img
                 src="/logo-1.png"
                 alt="Elite"
-                className="h-14 sm:h-20 w-auto max-w-[120px] sm:max-w-[180px] object-contain"
+                className="h-11 w-auto max-w-[90px] sm:h-20 sm:max-w-[180px] object-contain"
                 decoding="async"
-                fetchPriority="high"
                 style={{
                   display: 'block',
                   filter: 'sepia(0.85) hue-rotate(328deg) saturate(2.2) brightness(1.15) contrast(1.05)',
@@ -323,7 +323,7 @@ export function GuestPage() {
                 aria-hidden
               />
               <h1
-                className="text-[1.1rem] sm:text-[1.4rem] font-bold tracking-tight"
+                className="text-[1rem] sm:text-[1.4rem] font-bold tracking-tight"
                 style={{
                   color: '#1a1917',
                   fontFamily: 'Tajawal, Cairo, sans-serif',
@@ -334,7 +334,7 @@ export function GuestPage() {
                 عجلة الولاء
               </h1>
               <p
-                className="text-[0.75rem] sm:text-[0.875rem] mt-1 sm:mt-1.5 font-medium tracking-wide"
+                className="text-[0.7rem] sm:text-[0.875rem] mt-0.5 sm:mt-1.5 font-medium tracking-wide"
                 style={{
                   color: '#5c5348',
                   fontFamily: 'Tajawal, Cairo, sans-serif',
@@ -432,15 +432,15 @@ export function GuestPage() {
         )}
 
         {phase === 'wheel' && !pendingPrizeBanner && (
-          <>
+          <div className="flex-1 flex flex-col min-w-0 overflow-visible">
             {availableIndices.length === 0 && (
-              <p className="text-center text-amber-800 bg-amber-100/90 rounded-xl px-4 py-3 max-w-[432px] mx-auto mb-4" data-testid="msg-no-prizes">
+              <p className="text-center text-amber-800 bg-amber-100/90 rounded-xl px-3 py-2 sm:px-4 sm:py-3 max-w-[432px] mx-auto mb-2 sm:mb-4 text-sm" data-testid="msg-no-prizes">
                 انتهت الجوائز المؤقتاً. الرجاء مراجعة الإعدادات من لوحة التحكم.
               </p>
             )}
             {allowSpinWithoutCheck && availableIndices.length > 0 && (
               <div
-                className="w-full mb-4 animate-one-try-message"
+                className="w-full mb-2 sm:mb-4 animate-one-try-message flex-shrink-0"
                 style={{
                   background: 'rgba(255,255,255,0.85)',
                   fontFamily: 'Tajawal, Cairo, sans-serif',
@@ -492,7 +492,7 @@ export function GuestPage() {
               onSpinProgress={allowSpinWithoutCheck ? setSpinProgress : undefined}
               guestName={checkedGuest?.name ?? lastRegisteredGuest?.name ?? ''}
             />
-          </>
+          </div>
         )}
 
         {phase === 'code' && wonPrize && (
@@ -525,6 +525,7 @@ export function GuestPage() {
             onLookup={handleLookup}
             onRegisterAndSpin={handleRegisterAndSpin}
             registerPrompt={settings.messages.registerPrompt}
+            eligibleNoTierMessage={settings.messages.eligibleNoTier}
             eligibilityError={eligibilityError}
             onClearEligibilityError={() => setEligibilityError('')}
           />

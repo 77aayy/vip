@@ -7,6 +7,10 @@ export default {
         arabic: ['IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
       },
       colors: {
+        primary: {
+          400: '#2dd4bf',
+          500: '#14b8a6',
+        },
         surface: {
           DEFAULT: '#0a0a0a',
           elevated: '#141414',

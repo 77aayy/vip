@@ -13,9 +13,6 @@ const SEGMENT_COLORS = [
   '#e0d5c4',
 ]
 
-/** حجم خط نصوص الشرائح — يسمح بعرض العبارة كاملة داخل الشريحة كما في المرجع */
-const SEGMENT_FONT_SIZE = 15.6
-
 interface WheelProps {
   prizes: Prize[]
   onSpinEnd: (prize: Prize) => void
@@ -70,17 +67,28 @@ export function Wheel({
   }, [triggerSpin, spinning])
 
   const segmentAngle = 360 / prizes.length
-  const segmentFontSize = prizes.length > 12 ? 11 : prizes.length > 10 ? 13 : 15.6
+  const segmentFontSize = prizes.length > 12 ? 12 : prizes.length > 10 ? 13.5 : 15
   const isNarrow = typeof window !== 'undefined' && window.innerWidth < 400
-  const size = typeof window !== 'undefined'
-    ? Math.min(isNarrow ? 300 : 340, window.innerWidth - (isNarrow ? 24 : 32))
-    : 340
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640
   const rimWidth = 12
+  const raysExtra = rimWidth * 2 + 16 + 48
+  const size = typeof window !== 'undefined'
+    ? (() => {
+        const maxByViewport = window.innerWidth - (isNarrow ? 24 : 32)
+        const maxByRays = window.innerWidth - 24 - raysExtra
+        let cap = Math.min(isNarrow ? 300 : 340, maxByViewport, maxByRays)
+        if (isMobile && typeof window !== 'undefined') {
+          const spaceForWheel = (window.innerHeight - 180) * 0.5
+          const maxByHeight = Math.floor(spaceForWheel - raysExtra)
+          if (maxByHeight > 0 && maxByHeight < cap) cap = Math.max(200, maxByHeight)
+        }
+        return Math.max(200, cap)
+      })()
+    : 340
   const innerSize = size - 8
   const cx = innerSize / 2
   const cy = innerSize / 2
   const segmentRadius = innerSize / 2 - 6
-  // نصف قطر النص في منتصف الشريحة لعرض العبارة كاملة كما في المرجع
   const textRadius = segmentRadius - 40
 
   const segments = useMemo(() => {
@@ -91,15 +99,31 @@ export function Wheel({
       const rad = (midAngle - 90) * (Math.PI / 180)
       const tx = cx + textRadius * Math.cos(rad)
       const ty = cy + textRadius * Math.sin(rad)
-      // زاوية من مركز النص إلى مركز العجلة (بالدرجات)؛ النص يُدار بحيث يكون مقروءاً عند وقوف المؤشر على الجائزة (أعلى الحروف للخارج)
+      // النص بميل 90° مع الشريحة (باتجاه نصف القطر) ليكون داخل الشريحة وواضحاً
       const angleToCenterRad = Math.atan2(cy - ty, cx - tx)
       let angleToCenterDeg = (angleToCenterRad * 180) / Math.PI
       if (angleToCenterDeg < 0) angleToCenterDeg += 360
-      const textRotation = (angleToCenterDeg + 270) % 360
+      const textRotation = (angleToCenterDeg + 180) % 360
       const label = p.label
-      const displayLabelLines: string[] = label.includes(' ')
-        ? [label.split(' ')[0], label.split(' ').slice(1).join(' ')]
-        : [label]
+      const maxCharsPerLine = prizes.length > 12 ? 6 : prizes.length > 10 ? 7 : 9
+      const parts = label.split(/\s+/).filter(Boolean)
+      let displayLabelLines: string[]
+      if (parts.length === 0) {
+        displayLabelLines = [label]
+      } else if (parts.length === 1) {
+        displayLabelLines = label.length > maxCharsPerLine
+          ? [label.slice(0, maxCharsPerLine), label.slice(maxCharsPerLine)]
+          : [label]
+      } else {
+        const first = parts[0]
+        const rest = parts.slice(1).join(' ')
+        if (first.length > maxCharsPerLine || rest.length > maxCharsPerLine) {
+          const mid = Math.ceil(label.length / 2)
+          displayLabelLines = [label.slice(0, mid), label.slice(mid)]
+        } else {
+          displayLabelLines = [first, rest]
+        }
+      }
       const path = describeArc(cx, cy, segmentRadius, startAngle, endAngle)
       const clipPathD = path
       return {
@@ -193,10 +217,23 @@ export function Wheel({
   const raysSize = wheelSize + 48
 
   return (
-    <div className="flex flex-col items-center justify-center w-full max-w-[432px] min-w-0 mx-auto px-0 py-2 sm:py-6 safe-area-pb">
-      <div className="relative mx-auto" style={{ width: raysSize, height: raysSize }}>
+    <div
+      className="w-full max-w-[432px] min-w-0 mx-auto px-0 py-2 sm:py-6 safe-area-pb"
+      style={{
+        display: 'block',
+        width: '100%',
+        direction: 'ltr',
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* ١) العجلة فوق — دائماً أول عنصر */}
+      <div
+        className="relative mx-auto w-full"
+        style={{ display: 'block', maxWidth: raysSize, marginLeft: 'auto', marginRight: 'auto' }}
+      >
+        <div className="relative shrink-0" style={{ width: raysSize, height: raysSize }}>
         <div
-          className="wheel-glow relative rounded-full select-none touch-none p-4 overflow-visible"
+          className="wheel-glow relative rounded-full select-none touch-none p-2 sm:p-4 overflow-visible"
           style={{
             left: '50%',
             top: '50%',
@@ -332,19 +369,19 @@ export function Wheel({
                     x={seg.textX}
                     y={seg.textY}
                     textAnchor="middle"
-                    fill="#3d3428"
+                    fill="#2c2825"
                     fontSize={segmentFontSize}
                     fontWeight="700"
                     fontFamily="Tajawal, Cairo, sans-serif"
                     transform={`rotate(${seg.textRotation}, ${seg.textX}, ${seg.textY})`}
                   >
-                    {seg.displayLabelLines.length === 2 ? (
-                      <>
-                        <tspan x={seg.textX} dy={-segmentFontSize * 0.5}>{seg.displayLabelLines[0]}</tspan>
-                        <tspan x={seg.textX} dy={segmentFontSize}>{seg.displayLabelLines[1]}</tspan>
-                      </>
-                    ) : (
+                    {seg.displayLabelLines.length === 1 ? (
                       <tspan x={seg.textX} dy={0}>{seg.displayLabelLines[0]}</tspan>
+                    ) : (
+                      <>
+                        <tspan x={seg.textX} dy={-segmentFontSize * 0.45}>{seg.displayLabelLines[0]}</tspan>
+                        <tspan x={seg.textX} dy={segmentFontSize * 0.95}>{seg.displayLabelLines[1]}</tspan>
+                      </>
                     )}
                   </text>
                 </g>
@@ -409,12 +446,18 @@ export function Wheel({
           </div>
         </div>
       </div>
-      <div className="mt-3 sm:mt-6 flex flex-row flex-wrap items-end justify-center gap-3 sm:gap-6 w-full max-w-[432px] min-w-0 mx-auto px-0" style={{ direction: 'ltr' }}>
-        <div className="flex-1 min-w-0 sm:min-w-[200px] w-full sm:w-auto sm:max-w-[280px] flex flex-col items-center gap-1 sm:gap-1.5 min-h-[44px] sm:min-h-[120px]">
+      </div>
+      {/* ٢) الأزرار تحت العجلة — دائماً ثاني عنصر */}
+      <div
+        className="mt-4 w-full max-w-[432px] min-w-[280px] mx-auto px-0 flex flex-col items-center gap-2 sm:gap-4"
+        dir="rtl"
+        style={{ display: 'block', width: '100%', marginLeft: 'auto', marginRight: 'auto', boxSizing: 'border-box' }}
+      >
+        <div className="flex flex-col items-center gap-1.5 sm:gap-2 w-full" style={{ minWidth: 0 }}>
           {!skipPhoneCheck && (
             <p
-              className="text-[0.6875rem] text-center leading-tight flex-1"
-              style={{ color: '#5c5348', fontFamily: 'Tajawal, Cairo, sans-serif' }}
+              className="text-[0.75rem] sm:text-[0.8125rem] text-center leading-snug w-full px-2"
+              style={{ color: '#5c5348', fontFamily: 'Tajawal, Cairo, sans-serif', maxWidth: '320px', boxSizing: 'border-box' }}
             >
               لو كنت عضو إليت (فضي - ذهبي - بلاتيني) ابشر بسعدك.. مفاجأتنا بانتظارك!
             </p>
@@ -428,43 +471,47 @@ export function Wheel({
                 : (onSpinRequest ?? handleSpin)
             }
             disabled={spinning || disabled}
-            className={`w-full min-h-[48px] py-3.5 rounded-xl text-white font-bold active:scale-[0.99] transition-all disabled:opacity-40 disabled:pointer-events-none touch-manipulation ${spinning ? 'animate-wheel-btn-pulse text-[0.7rem] whitespace-nowrap overflow-hidden text-ellipsis px-2' : 'text-[0.9375rem] leading-tight'}`}
+            className={`w-full min-w-[200px] max-w-[280px] min-h-[44px] sm:min-h-[48px] py-2.5 sm:py-3.5 rounded-xl text-white font-bold active:scale-[0.99] transition-all disabled:opacity-40 disabled:pointer-events-none touch-manipulation text-[0.9375rem] sm:text-[1rem] leading-tight ${spinning ? 'animate-wheel-btn-pulse' : ''}`}
             style={{
               fontFamily: 'Tajawal, Cairo, sans-serif',
               background: 'linear-gradient(180deg, #e8c547 0%, #d4af37 25%, #b8860b 60%, #9a7209 100%)',
               boxShadow: spinning ? undefined : '0 3px 12px rgba(0,0,0,0.3), inset 0 2px 0 rgba(255,255,255,0.3), inset 0 -1px 0 rgba(0,0,0,0.2)',
+              minWidth: 200,
+              maxWidth: 280,
+              width: '100%',
+              boxSizing: 'border-box',
             }}
           >
             {spinning
               ? (guestName?.trim()
-                  ? `هديتك في الطريق يا ${guestName.trim()} وجالسين نختار لك الأجمل ✨🎁`
-                  : 'هديتك في الطريق وجالسين نختار لك الأجمل ✨🎁')
+                  ? `هديتك في الطريق يا ${guestName.trim()} ✨🎁`
+                  : 'هديتك في الطريق ✨🎁')
               : 'اضغط هنا'}
           </button>
         </div>
         {onSkipGift && !skipPhoneCheck && (
-          <div className="flex-1 min-w-0 sm:min-w-[200px] w-full sm:w-auto sm:max-w-[280px] flex flex-col items-center gap-1 sm:gap-1.5 min-h-[44px] sm:min-h-[120px]">
+          <div className="flex flex-col items-center gap-1.5 sm:gap-2 pt-1.5 sm:pt-2 border-t border-amber-900/20 w-full" style={{ minWidth: 0 }}>
             <p
-              className="text-[0.6875rem] text-center leading-tight flex-1"
-              style={{ color: '#5c5348', fontFamily: 'Tajawal, Cairo, sans-serif' }}
+              className="text-[0.7rem] sm:text-[0.8125rem] text-center leading-snug w-full px-2"
+              style={{ color: '#5c5348', fontFamily: 'Tajawal, Cairo, sans-serif', maxWidth: 320, boxSizing: 'border-box' }}
             >
-              عضو جديد ما بنقصر معك لك عضوية فضية مجاناً
-              <br />
-              سجل الان لفتح عجلة الحظ
-              <br />
-              التسجيل مفتوح الان مجانى لفترة محدودة
+              عضو جديد؟ سجل الآن وامسك عضوية فضية مجاناً وافتح العجلة
             </p>
             <button
               type="button"
               onClick={onSkipGift}
               data-testid="btn-skip-gift"
-              className="w-full min-h-[48px] py-3.5 rounded-xl text-[0.9375rem] font-bold active:scale-[0.99] transition-all border-2 touch-manipulation"
+              className="w-full min-w-[200px] max-w-[280px] min-h-[44px] sm:min-h-[48px] py-2.5 sm:py-3.5 rounded-xl text-[0.9375rem] sm:text-[1rem] font-bold active:scale-[0.99] transition-all border-2 touch-manipulation"
               style={{
                 fontFamily: 'Tajawal, Cairo, sans-serif',
                 color: '#2c2825',
                 borderColor: 'rgba(212, 175, 55, 0.7)',
-                background: 'rgba(255,255,255,0.5)',
+                background: 'rgba(255,255,255,0.6)',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                minWidth: 200,
+                maxWidth: 280,
+                width: '100%',
+                boxSizing: 'border-box',
               }}
             >
               اضغط للتسجيل مجاناً

@@ -8,12 +8,30 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
-  @apply font-arabic antialiased min-h-screen overflow-x-hidden;
+  @apply font-arabic antialiased overflow-x-hidden;
   background-color: #0a0a0a;
   color: #fafafa;
+}
+
+/* موبايل: منع السكرول الأفقي فقط — العمودي مسموح لرؤية الدائرة والأزرار كاملة */
+@media (max-width: 640px) {
+  html {
+    min-height: 100dvh;
+    min-height: -webkit-fill-available;
+  }
+  body {
+    min-height: 100dvh;
+    min-height: -webkit-fill-available;
+    overflow-x: hidden;
+  }
+  #root {
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
 }
 
 .safe-area-pb {
@@ -31,12 +49,6 @@ body {
   overscroll-behavior-y: none;
 }
 
-@media (max-width: 768px) {
-  body {
-    min-height: 100vh;
-    min-height: -webkit-fill-available;
-  }
-}
 
 .min-h-screen-dvh {
   min-height: 100vh;
@@ -172,6 +184,29 @@ body {
 }
 
 /* العجلة — توهج نابض + أشعة ذهبية */
+/* شريط تحميل غير محدد — للملفات */
+@keyframes upload-bar-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.animate-upload-bar {
+  overflow: hidden;
+  position: relative;
+}
+.animate-upload-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,255,255,0.25) 50%,
+    transparent 100%
+  );
+  width: 50%;
+  animation: upload-bar-shimmer 1.5s ease-in-out infinite;
+}
+
 @keyframes wheel-glow {
   0%, 100% {
     box-shadow:
@@ -199,4 +234,53 @@ body {
 }
 .wheel-rays {
   animation: wheel-rays-rotate 20s linear infinite;
+}
+
+/* طباعة QR — مقاس A4 مباشر */
+@page {
+  size: A4 portrait;
+  margin: 12mm;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #print-qr-card,
+  #print-qr-card * {
+    visibility: visible;
+  }
+  #print-qr-card {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 297mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    page-break-after: avoid;
+  }
+  #print-qr-card #qr-container {
+    padding: 2rem !important;
+  }
+  #print-qr-card #qr-container svg {
+    width: 100mm !important;
+    height: 100mm !important;
+  }
+}
+
+/* إخفاء مؤشر الزيادة/النقصان في حقل الرقم */
+.input-no-spinner::-webkit-outer-spin-button,
+.input-no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.input-no-spinner {
+  -moz-appearance: textfield;
 }

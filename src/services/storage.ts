@@ -3,6 +3,32 @@ import { defaultSettings } from './mockSettings'
 
 const KEY = 'loyalty_wheel_data'
 const KEY_NEW_MEMBERS = 'loyalty_new_members'
+const KEY_REVENUE_MAPPING = 'revenue_id_phone_mapping'
+
+export interface RevenueMappingRow {
+  idNumber?: string
+  name?: string
+  phone: string
+}
+
+export function getRevenueMapping(): RevenueMappingRow[] {
+  try {
+    const raw = localStorage.getItem(KEY_REVENUE_MAPPING)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as RevenueMappingRow[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export function setRevenueMapping(rows: RevenueMappingRow[]): void {
+  try {
+    localStorage.setItem(KEY_REVENUE_MAPPING, JSON.stringify(rows))
+  } catch {
+    // ignore
+  }
+}
 
 export interface NewMemberLogEntry {
   id: string

@@ -15,25 +15,35 @@ export async function lookupGuestAsync(phone: string): Promise<GuestLookup | nul
   return lookupGuest(phone)
 }
 
+function getEligibleTier(
+  points: number,
+  silverToGold: number,
+  goldToPlatinum: number
+): Tier {
+  if (points >= silverToGold + goldToPlatinum) return 'platinum'
+  if (points >= silverToGold) return 'gold'
+  return 'silver'
+}
+
 export function lookupGuest(phone: string): GuestLookup | null {
   const p = norm(phone)
   if (!p) return null
   const platinum = getPlatinum()
   const gold = getGold()
   const silver = getSilver()
-  if (platinum.length + gold.length + silver.length === 0) return null
   const revenue = getRevenue()
   const settings = getSettings()
 
-  const rev = revenue.find((r) => norm(r.phone) === p)
-  const points = rev
-    ? Math.round(rev.total_spent / (settings.revenueToPoints || 1))
-    : 0
+  const totalSpent = revenue
+    .filter((r) => norm(r.phone) === p)
+    .reduce((s, r) => s + (r.total_spent ?? 0), 0)
+  const points = Math.round(totalSpent / (settings.revenueToPoints || 1))
 
   let tier: Tier
   let name: string
-
   let idLastDigits: string | undefined
+  let inTier = true
+
   const inPlatinum = platinum.find((r) => norm(r.phone) === p)
   if (inPlatinum) {
     tier = 'platinum'
@@ -52,22 +62,29 @@ export function lookupGuest(phone: string): GuestLookup | null {
         name = inSilver.name
         idLastDigits = inSilver.idLastDigits
       } else {
-        return null
+        if (totalSpent <= 0) return null
+        inTier = false
+        tier = getEligibleTier(
+          points,
+          settings.pointsSilverToGold ?? 10000,
+          settings.pointsGoldToPlatinum ?? 12000
+        )
+        name = ''
       }
     }
   }
 
   const pointsToNextTier: number | null =
     tier === 'silver'
-      ? Math.max(0, settings.pointsSilverToGold - points)
+      ? Math.max(0, (settings.pointsSilverToGold ?? 10000) - points)
       : tier === 'gold'
-        ? Math.max(0, settings.pointsGoldToPlatinum - points)
+        ? Math.max(0, (settings.pointsGoldToPlatinum ?? 12000) - points)
         : null
   const pointsNextThreshold: number | null =
     tier === 'silver'
-      ? settings.pointsSilverToGold
+      ? settings.pointsSilverToGold ?? 10000
       : tier === 'gold'
-        ? settings.pointsGoldToPlatinum
+        ? settings.pointsGoldToPlatinum ?? 12000
         : null
 
   return {
@@ -78,5 +95,8 @@ export function lookupGuest(phone: string): GuestLookup | null {
     pointsToNextTier: pointsToNextTier === 0 ? null : pointsToNextTier,
     pointsNextThreshold,
     ...(idLastDigits != null && idLastDigits !== '' && { idLastDigits }),
+    inTier,
+    ...(totalSpent > 0 && { totalSpent }),
+    ...(!inTier && { eligibleTier: tier }),
   }
 }

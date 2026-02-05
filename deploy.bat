@@ -4,35 +4,25 @@ setlocal
 cd /d "%~dp0"
 
 echo ========================================
-echo   رفع إلى GitHub + نشر على Firebase
+echo   رفع إلى Firebase (واختياري: GitHub)
 echo ========================================
 echo.
 
-echo [1/4] Git: إضافة التغييرات...
-git add -A
-if errorlevel 1 (
-  echo خطأ في git add
+echo [1/4] التأكد من المجلد...
+if not exist "package.json" (
+  echo خطأ: لا يوجد package.json. شغّل الملف من مجلد المشروع.
   pause
   exit /b 1
 )
-
-echo [2/4] Git: حفظ ونشر إلى GitHub...
-set MSG=deploy %date% %time%
-set MSG=%MSG:~0,-3%
-git commit -m "%MSG%" 2>nul
-if errorlevel 1 (
-  echo لا توجد تغييرات جديدة للرفع أو فشل commit.
-) else (
-  git push
-  if errorlevel 1 (
-    echo تحذير: فشل git push. تأكد من الريموت والصلاحيات.
-  ) else (
-    echo تم الرفع إلى GitHub بنجاح.
-  )
+if not exist "firebase.json" (
+  echo خطأ: لا يوجد firebase.json في المشروع.
+  pause
+  exit /b 1
 )
+echo المجلد صحيح.
 echo.
 
-echo [3/4] بناء المشروع...
+echo [2/4] بناء المشروع (npm run build)...
 call npm run build
 if errorlevel 1 (
   echo فشل البناء. راجع الأخطاء أعلاه.
@@ -41,16 +31,29 @@ if errorlevel 1 (
 )
 echo.
 
-echo [4/4] النشر على Firebase...
-call firebase deploy
+echo [3/4] النشر على Firebase (npx firebase deploy)...
+call npx firebase deploy
 if errorlevel 1 (
-  echo فشل النشر على Firebase.
+  echo فشل النشر على Firebase. تأكد من: firebase login ووجود .firebaserc
   pause
   exit /b 1
+)
+echo.
+
+echo [4/4] اختياري: Git...
+git add -A 2>nul
+set MSG=deploy %date% %time%
+set MSG=%MSG:~0,-3%
+git commit -m "%MSG%" 2>nul
+if not errorlevel 1 (
+  git push 2>nul
+  if not errorlevel 1 echo تم الرفع إلى GitHub أيضاً.
 )
 
 echo.
 echo ========================================
-echo   تم: GitHub + Firebase بنجاح
+echo   تم: البناء + Firebase بنجاح
+echo ========================================
+echo الموقع: https://elite-vip-36dd8.web.app
 echo ========================================
 pause

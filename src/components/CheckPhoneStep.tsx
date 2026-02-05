@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type { GuestLookup } from '@/types'
 
+const tierLabel: Record<string, string> = { silver: 'فضي', gold: 'ذهبي', platinum: 'بلاتيني' }
+
 interface CheckPhoneStepProps {
   onSubmit: (phone: string) => void | Promise<void>
   onLookup: (phone: string) => Promise<GuestLookup | null>
   /** عند عدم وجود الرقم: تسجيل ثم فتح العجلة من نفس الشاشة (Conditional UI) */
   onRegisterAndSpin?: (data: { phone: string; name: string; id: string }) => void | Promise<void>
   registerPrompt?: string
+  /** رسالة للضيف له إيراد لكن لم يسجل — {totalSpent} و{eligibleTier} */
+  eligibleNoTierMessage?: string
   /** خطأ من السيرفر (مثلاً: هذا الرقم استخدم العجلة اليوم) */
   eligibilityError?: string
   onClearEligibilityError?: () => void
@@ -23,7 +27,7 @@ function maskName(name: string): string {
   return first + '****'
 }
 
-export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, registerPrompt = 'أكمل بياناتك ثم ادور لك العجلة', eligibilityError = '', onClearEligibilityError }: CheckPhoneStepProps) {
+export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, registerPrompt = 'أكمل بياناتك ثم ادور لك العجلة', eligibleNoTierMessage = 'بلغ إجمالي تعاملاتك معنا {totalSpent} ريالاً، وأنت مؤهل لفئة {eligibleTier}. ندعوك لتجربة العجلة!', eligibilityError = '', onClearEligibilityError }: CheckPhoneStepProps) {
   const [phone, setPhone] = useState('')
   const [name, setName] = useState('')
   const [id, setId] = useState('')
@@ -129,23 +133,39 @@ export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, register
   const inputClassCenter = inputClass + ' text-center'
 
   if (recognizedGuest && !loading) {
+    const inTier = recognizedGuest.inTier !== false
     const masked = maskName(recognizedGuest.name ?? '')
     const welcomeName = masked.startsWith('أستاذ') || masked.startsWith('السيد') ? masked : `أستاذ ${masked}`
     const idLast = recognizedGuest.idLastDigits?.replace(/\D/g, '').slice(-4)
+    const eligibleTierLabel = recognizedGuest.eligibleTier ? tierLabel[recognizedGuest.eligibleTier] ?? recognizedGuest.eligibleTier : 'فضي'
+    const messageForNoTier =
+      inTier
+        ? null
+        : eligibleNoTierMessage
+          .replace(/\{totalSpent\}/g, String(recognizedGuest.totalSpent ?? recognizedGuest.points))
+          .replace(/\{eligibleTier\}/g, eligibleTierLabel)
     return (
       <div className="w-full max-w-sm mx-auto py-6 animate-fade-in">
         <div className="rounded-2xl p-5 shadow-lg" style={cardStyle}>
-          <p className="text-center text-[1rem] font-medium mb-1" style={textStyle}>
-            أهلاً يا {welcomeName}، نورتنا تاني..
-          </p>
-          {idLast ? (
-            <p className="text-center text-[0.9375rem] mb-2" style={mutedStyle}>
-              هل هذا هو رقم هويتك المنتهي بـ (***{idLast})؟
+          {inTier ? (
+            <>
+              <p className="text-center text-[1rem] font-medium mb-1" style={textStyle}>
+                أهلاً يا {welcomeName}، نورتنا تاني..
+              </p>
+              {idLast ? (
+                <p className="text-center text-[0.9375rem] mb-2" style={mutedStyle}>
+                  هل هذا هو رقم هويتك المنتهي بـ (***{idLast})؟
+                </p>
+              ) : null}
+              <p className="text-center text-[0.9375rem] mb-4" style={mutedStyle}>
+                دور العجلة دلوقتي!
+              </p>
+            </>
+          ) : (
+            <p className="text-center text-[1rem] font-medium mb-4" style={textStyle}>
+              {messageForNoTier}
             </p>
-          ) : null}
-          <p className="text-center text-[0.9375rem] mb-4" style={mutedStyle}>
-            دور العجلة دلوقتي!
-          </p>
+          )}
           {eligibilityError && (
             <p className="text-center text-red-600 text-[0.8125rem] mb-3" role="alert">
               {eligibilityError}
