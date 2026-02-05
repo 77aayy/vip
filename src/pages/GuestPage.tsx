@@ -272,7 +272,7 @@ export function GuestPage() {
 
   return (
     <div className="min-h-[100dvh] flex flex-col overflow-x-hidden page-bg-leather safe-area-insets sm:min-h-screen">
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center min-h-0 pt-2 pb-6 px-2 sm:pt-6 sm:pb-10 sm:px-4 md:pt-8 md:pb-12 md:px-6 lg:pt-10 lg:pb-14 lg:px-8 xl:px-10 2xl:px-12">
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-start min-h-0 pt-2 pb-6 px-2 sm:justify-center sm:pt-6 sm:pb-10 sm:px-4 md:pt-8 md:pb-12 md:px-6 lg:pt-10 lg:pb-14 lg:px-8 xl:px-10 2xl:px-12">
         <div className="w-full max-w-[432px] min-w-0 mx-auto flex flex-col items-center sm:max-w-[440px] md:max-w-[480px] lg:max-w-[520px] xl:max-w-[560px] 2xl:max-w-[600px]">
         <header className="w-full flex-shrink-0 mb-2 sm:mb-6 md:mb-8">
           <div

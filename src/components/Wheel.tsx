@@ -78,9 +78,18 @@ export function Wheel({
   }, [triggerSpin, spinning])
 
   const segmentAngle = 360 / prizes.length
-  const segmentFontSize = prizes.length > 12 ? 12 : prizes.length > 10 ? 13.5 : 15
   const isNarrow = viewport.w < 400
   const isMobile = viewport.w < 640
+  const segmentFontSize = (() => {
+    if (isNarrow) return prizes.length > 12 ? 12 : prizes.length > 10 ? 13 : 14
+    if (isMobile) return prizes.length > 12 ? 13 : prizes.length > 10 ? 14.5 : 16
+    return prizes.length > 12 ? 15 : prizes.length > 10 ? 16.5 : 18
+  })()
+  const maxCharsPerLine = (() => {
+    if (isNarrow) return prizes.length > 12 ? 4 : prizes.length > 10 ? 5 : 6
+    if (isMobile) return prizes.length > 12 ? 5 : prizes.length > 10 ? 6 : 7
+    return prizes.length > 12 ? 6 : prizes.length > 10 ? 7 : 9
+  })()
   const rimWidth = 12
   const raysExtra = rimWidth * 2 + 16 + 48
   const size = (() => {
@@ -102,7 +111,7 @@ export function Wheel({
   const cx = innerSize / 2
   const cy = innerSize / 2
   const segmentRadius = innerSize / 2 - 6
-  const textRadius = segmentRadius - 40
+  const textRadius = segmentRadius - 22
 
   const segments = useMemo(() => {
     return prizes.map((p, i) => {
@@ -118,7 +127,6 @@ export function Wheel({
       if (angleToCenterDeg < 0) angleToCenterDeg += 360
       const textRotation = (angleToCenterDeg + 180) % 360
       const label = p.label
-      const maxCharsPerLine = prizes.length > 12 ? 6 : prizes.length > 10 ? 7 : 9
       const parts = label.split(/\s+/).filter(Boolean)
       let displayLabelLines: string[]
       if (parts.length === 0) {
@@ -152,7 +160,7 @@ export function Wheel({
         displayLabelLines,
       }
     })
-  }, [prizes, segmentAngle, size, cx, cy, segmentRadius, textRadius])
+  }, [prizes, segmentAngle, size, cx, cy, segmentRadius, textRadius, maxCharsPerLine])
 
   const isRtl = typeof document !== 'undefined' && document.documentElement.dir === 'rtl'
 
@@ -177,7 +185,7 @@ export function Wheel({
         ? targetWinnerIndex
         : canPick[Math.floor(Math.random() * canPick.length)]
     const winnerMidAngle = winnerIndex * segmentAngle + segmentAngle / 2
-    const extraTurns = 3
+    const extraTurns = 1.5
     const currentMod = ((rotation % 360) + 360) % 360
     const targetAngle = isRtl ? (360 - winnerMidAngle) % 360 : winnerMidAngle
     const offsetToWinner = (targetAngle - currentMod + 360) % 360
@@ -185,7 +193,7 @@ export function Wheel({
     const start = performance.now()
     const startRot = rotation
     const totalDelta = totalRotation - startRot
-    const durationMaxMs = 22000
+    const durationMaxMs = 13000
     // Cubic-Bezier(0.1, 0, 0, 1) — حركة فخمة (احتكاك/جاذبية)، العجلة بتهدي ببطء
     const run = (now: number) => {
       const elapsed = now - start
