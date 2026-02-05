@@ -38,10 +38,17 @@ const TERMS_ITEMS: string[] = [
   'الفندق غير مسؤول عن: عدم استخدامك للكود فى الفتره المخصصه له 3 شهور؛ عدم ارسالك للكود بعدد الفوز به مباشره؛ أعطال الإنترنت؛ مشاكل واتساب؛ سوء استخدام الكود من العميل.',
 ]
 
+/** كود تحقق فريد — يستخدم crypto.getRandomValues لمقاومة التوقّع والتلاعب */
 function generateCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let s = ''
-  for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)]
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const arr = new Uint32Array(8)
+    crypto.getRandomValues(arr)
+    for (let i = 0; i < 8; i++) s += chars[arr[i]! % chars.length]
+  } else {
+    for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)]
+  }
   return s
 }
 

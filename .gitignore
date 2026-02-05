@@ -22,3 +22,7 @@ firebase-debug*.log
 .DS_Store
 Thumbs.db
 *.log
+
+# بيانات Excel (لا نرفعها على المستودع)
+*.xlsx
+*.xls

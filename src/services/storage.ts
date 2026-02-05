@@ -1,9 +1,12 @@
 import type { MemberRow, RevenueRow, Settings, StoredData } from '@/types'
+import type { RevenueParseRow } from './excelParser'
 import { defaultSettings } from './mockSettings'
 
 const KEY = 'loyalty_wheel_data'
 const KEY_NEW_MEMBERS = 'loyalty_new_members'
 const KEY_REVENUE_MAPPING = 'revenue_id_phone_mapping'
+/** نسخة الإيراد الخام (قبل الربط) — لإعادة الربط عند تحديث ملف العملاء/الربط */
+const KEY_RAW_REVENUE = 'revenue_raw_parse'
 
 export interface RevenueMappingRow {
   idNumber?: string
@@ -25,6 +28,25 @@ export function getRevenueMapping(): RevenueMappingRow[] {
 export function setRevenueMapping(rows: RevenueMappingRow[]): void {
   try {
     localStorage.setItem(KEY_REVENUE_MAPPING, JSON.stringify(rows))
+  } catch {
+    // ignore
+  }
+}
+
+export function getRawRevenue(): RevenueParseRow[] {
+  try {
+    const raw = localStorage.getItem(KEY_RAW_REVENUE)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as RevenueParseRow[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export function setRawRevenue(rows: RevenueParseRow[]): void {
+  try {
+    localStorage.setItem(KEY_RAW_REVENUE, JSON.stringify(rows))
   } catch {
     // ignore
   }

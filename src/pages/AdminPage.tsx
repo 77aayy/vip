@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { parseMemberFile, parseRevenueFile, mergeRevenueParseRows, parseMappingFile, resolveRevenueToPhone } from '@/services/excelParser'
+import { parseMemberFile, parseRevenueFile, mergeRevenueParseRows, parseMappingFile, mergeMappingResults, resolveRevenueToPhone } from '@/services/excelParser'
 import {
   getSettings,
   getPrizeUsage,
@@ -14,6 +14,8 @@ import {
   getRevenue,
   getRevenueMapping,
   setRevenueMapping,
+  getRawRevenue,
+  setRawRevenue,
 } from '@/services/storage'
 import {
   isFirestoreAvailable,
@@ -265,6 +267,7 @@ export function AdminPage() {
         })
         rowsForReport = revenueRows
         setRevenue(revenueRows)
+        setRawRevenue(parsed)
         if (useFirestore) {
           await writeRevenueBatch(revenueRows)
           const c = await getCountsAsync()
@@ -497,7 +500,8 @@ export function AdminPage() {
               <ul className="text-white/80 text-sm space-y-1.5 list-disc list-inside leading-relaxed">
                 <li>الصف الأول = عناوين الأعمدة (يُقرأ تلقائياً).</li>
                 <li><strong>قوائم الفضي/الذهبي/البلاتيني:</strong> مطلوب عمود جوال («جوال» أو «phone» أو «رقم» أو «mobile» أو «tel»). اختياري: «اسم»، «إيراد» أو «مبلغ»، «رقم الهوية».</li>
-                <li><strong>كشف الإيراد:</strong> يمكن رفع حتى 5 ملفات (واحد لكل فرع). مطلوب عمود جوال أو «رقم الهوية» + عمود «المدفوع» أو «الاجمالي». للربط: ارفع أولاً «ملف الربط» من نظام الفندق (رقم الهوية + جوال) لربط الأرقام غير المطابقة.</li>
+                <li><strong>كشف الإيراد:</strong> يمكن رفع حتى 5 ملفات (واحد لكل فرع). مطلوب عمود جوال أو «رقم الهوية» + عمود «المدفوع» أو «الاجمالي». للربط: ارفع أولاً «رفع بيانات النزلاء» أو «ملف الربط» لربط صفوف الإيراد بأرقام الجوال.</li>
+                <li><strong>بيانات النزلاء:</strong> من قسم «ربط كشف الإيراد» — ارفع <strong>ملفاً واحداً أو حتى 50 ملف</strong>. النزلاء الجدد يُضافون إلى القائمة المحفوظة (لا استبدال). الملف: عمود <strong>رقم الجوال</strong> + <strong>رقم الهوية</strong> و/أو <strong>الاسم</strong>.</li>
                 <li>الرفع يستبدل القائمة الحالية (محلياً وعلى Firebase إن كان مفعّلاً).</li>
               </ul>
               <p className="text-white/60 text-xs mt-2">صيغ مقبولة: .xlsx, .xls, .csv — يُقرأ أول شيت فقط.</p>
@@ -505,7 +509,7 @@ export function AdminPage() {
           )}
         </div>
 
-        {/* 4 upload icons */}
+        {/* 4 upload icons + رفع بيانات النزلاء (لربط الإيراد بالجوال) */}
         <div className="grid grid-cols-2 gap-4 mb-8">
           {(['silver', 'gold', 'platinum', 'revenue'] as const).map((key) => (
             <label
@@ -544,38 +548,124 @@ export function AdminPage() {
           ))}
         </div>
 
-        {/* ربط كشف الإيراد — ملف الربط + الربط بالاسم */}
+        {/* ربط كشف الإيراد — رفع ملفات العملاء (حتى 50) + الربط بالاسم */}
         <div className="mb-6 p-4 rounded-2xl bg-surface-card border border-white/[0.06] space-y-3">
           <h3 className="text-white font-semibold text-sm flex items-center gap-2">
             <span title="ربط">🔗</span>
             ربط كشف الإيراد برقم الجوال
           </h3>
+          <p className="text-white/50 text-xs">ارفع ملفات العملاء (جوال + رقم هوية/اسم) — ملف واحد أو حتى 50 ملف. تُضاف إلى القائمة المحفوظة ولا تُستبدَل (التكرار يُزال تلقائياً).</p>
           <label className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
             <span className="text-2xl">📎</span>
             <div className="flex-1">
-              <p className="text-white/90 text-sm font-medium">رفع ملف الربط (رقم الهوية + جوال)</p>
-              <p className="text-white/50 text-xs mt-0.5">صدّر من نظام الفندق عمودي «رقم الهوية» و«جوال» — يستبدل الربط القديم</p>
+              <p className="text-white/90 text-sm font-medium">رفع ملفات العملاء (حتى 50 ملف)</p>
+              <p className="text-white/50 text-xs mt-0.5">تُضاف النزلاء الجدد فقط إلى القائمة الحالية — يُحدّث ربط الإيراد تلقائياً</p>
             </div>
-            <span className="text-primary-500 text-sm font-semibold">{mappingCount} سطر</span>
             <input
               type="file"
               accept=".xlsx,.xls,.csv"
+              multiple
               className="hidden"
               onChange={async (e) => {
-                const f = e.target.files?.[0]
-                if (!f) return
+                const list = e.target.files
+                if (!list?.length) return
+                const files = [...list].slice(0, 50)
                 e.target.value = ''
+                if (loading !== null) return
                 try {
                   setError('')
-                  const rows = await parseMappingFile(f)
-                  setRevenueMapping(rows)
-                  setMappingCount(rows.length)
-                  setSuccess(`تم رفع ملف الربط: ${rows.length} سطر (رقم هوية/اسم → جوال)`)
+                  let rows: { phone: string; idNumber?: string; name?: string }[]
+                  let rawDataRows: number
+                  if (files.length === 1) {
+                    const res = await parseMappingFile(files[0])
+                    rows = res.rows
+                    rawDataRows = res.rawDataRows
+                  } else {
+                    const results: Awaited<ReturnType<typeof parseMappingFile>>[] = []
+                    const skipped: string[] = []
+                    for (const f of files) {
+                      try {
+                        const res = await parseMappingFile(f)
+                        if (res.rows.length > 0 || res.rawDataRows > 0) results.push(res)
+                        else skipped.push(f.name)
+                      } catch (err) {
+                        skipped.push(`${f.name}: ${err instanceof Error ? err.message : 'خطأ'}`)
+                      }
+                    }
+                    if (results.length === 0) {
+                      setError(
+                        skipped.length > 0
+                          ? `لم يُستخرج نزيل من أي ملف. تفاصيل: ${skipped.slice(0, 3).join('؛ ')}${skipped.length > 3 ? ` (و${skipped.length - 3} غيرها)` : ''}. تأكد أن كل ملف فيه عمود «رقم الجوال» وعمود «رقم الهوية» أو «الاسم»، وأن أرقام الجوال صالحة (٩ خانات على الأقل).`
+                          : 'لم يُستخرج أي نزيل من الملف/الملفات. تأكد أن صف العناوين يحتوي عمود «رقم الجوال» وعمود «رقم الهوية» أو «الاسم»، وأن صفوف البيانات تحتوي أرقام جوال صالحة (٩ خانات على الأقل). لم يتم استبدال قائمة الربط الحالية.'
+                      )
+                      return
+                    }
+                    const merged = mergeMappingResults(results)
+                    rows = merged.rows
+                    rawDataRows = merged.rawDataRows
+                    if (skipped.length > 0 && rows.length === 0) {
+                      setError(`تم تخطي ${skipped.length} ملف لعدم صلاحيتها. لم يتبقّ أي نزيل للربط.`)
+                      return
+                    }
+                  }
+                  if (rows.length === 0) {
+                    setError('لم يُستخرج أي نزيل من الملف/الملفات. تأكد أن صف العناوين يحتوي عمود «رقم الجوال» وعمود «رقم الهوية» أو «الاسم»، وأن صفوف البيانات تحتوي أرقام جوال صالحة (٩ خانات على الأقل).')
+                    return
+                  }
+                  // دمج مع القائمة المحفوظة — القائمة تزيد فقط (لا استبدال)
+                  const existing = getRevenueMapping()
+                  const byPhone = new Map<string, { phone: string; idNumber?: string; name?: string }>()
+                  for (const row of existing) {
+                    const p = row.phone.replace(/\D/g, '').slice(-9)
+                    if (p.length >= 9) byPhone.set(p, row)
+                  }
+                  for (const row of rows) {
+                    const p = row.phone.replace(/\D/g, '').slice(-9)
+                    if (p.length >= 9 && !byPhone.has(p)) byPhone.set(p, row)
+                  }
+                  const merged = [...byPhone.values()]
+                  const addedCount = merged.length - existing.length
+                  setRevenueMapping(merged)
+                  setMappingCount(merged.length)
+                  const rawRevenue = getRawRevenue()
+                  const rowNote = rawDataRows > 0
+                    ? (files.length > 1 ? ` (من ${files.length} ملف، ${rawDataRows.toLocaleString('ar-SA')} صف)` : ` (من ${rawDataRows.toLocaleString('ar-SA')} صف في الملف)`)
+                    : ''
+                  const addNote = addedCount > 0 ? `إضافة ${addedCount.toLocaleString('ar-SA')} نزيل جديد — المجموع ${merged.length.toLocaleString('ar-SA')} نزيل` : `لا نزلاء جدد من الملف — المجموع ${merged.length.toLocaleString('ar-SA')} نزيل`
+                  let msg = `تم تحديث قائمة العملاء: ${addNote}${rowNote} — يُربط بها كشف الإيراد`
+                  if (rawRevenue.length > 0) {
+                    const members = useFirestore
+                      ? await getMembersForRevenueResolveAsync()
+                      : [
+                          ...getSilver().map((m) => ({ ...m, tier: 'silver' as const })),
+                          ...getGold().map((m) => ({ ...m, tier: 'gold' as const })),
+                          ...getPlatinum().map((m) => ({ ...m, tier: 'platinum' as const })),
+                        ]
+                    const mapping = getRevenueMapping()
+                    const revenueRows = resolveRevenueToPhone(rawRevenue, members, {
+                      useNameFallback: useRevenueNameLink,
+                      mapping: mapping.length > 0 ? mapping : undefined,
+                    })
+                    setRevenue(revenueRows)
+                    if (useFirestore) {
+                      await writeRevenueBatch(revenueRows)
+                      const c = await getCountsAsync()
+                      setCounts(c)
+                    } else {
+                      setCounts((c) => ({ ...c, revenue: revenueRows.length }))
+                    }
+                    msg += ` — تم تحديث ربط الإيراد تلقائياً (${revenueRows.length} سجل)`
+                  } else if (getRevenue().length > 0) {
+                    msg += '. لو عايز رقم كشف الإيراد يتحدّث حسب الربط الجديد، ارفع كشف الإيراد (💰) مرة ثانية.'
+                  }
+                  setSuccess(msg)
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : 'خطأ في قراءة ملف الربط')
+                  setError(err instanceof Error ? err.message : 'خطأ في قراءة ملف/ملفات بيانات النزلاء')
                 }
               }}
+              disabled={loading !== null}
             />
+            <span className="text-primary-500 text-sm font-semibold">{mappingCount.toLocaleString('ar-SA')} نزيل</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -1168,7 +1258,7 @@ export function AdminPage() {
                     )}
                     {duplicateReport.revenueParsedCount > duplicateReport.totalRows && (
                       <div className="p-3 rounded-xl bg-red-500/20 border border-red-500/30 col-span-2">
-                        <p className="text-red-300/90 text-xs">لم يُربط برقم جوال — ارفع ملف الربط (رقم الهوية + جوال) من نظام الفندق</p>
+                        <p className="text-red-300/90 text-xs">لم يُربط برقم جوال — ارفع ملفات العملاء (📎 في قسم «ربط كشف الإيراد») إن لم تكن رفعت. إن كنت رفعتهم وقد بقي هؤلاء، فغالباً غير موجودين في قائمة العملاء أو الاسم/رقم الهوية في كشف الإيراد مكتوب بشكل مختلف.</p>
                         <p className="text-red-300 font-bold text-xl">{duplicateReport.revenueParsedCount - duplicateReport.totalRows} نزيل</p>
                       </div>
                     )}

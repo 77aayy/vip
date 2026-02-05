@@ -152,6 +152,12 @@ export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, register
               <p className="text-center text-[1rem] font-medium mb-1" style={textStyle}>
                 أهلاً يا {welcomeName}، نورتنا تاني..
               </p>
+              <p className="text-center text-[0.875rem] mb-1" style={mutedStyle}>
+                فئتك: <strong style={{ color: '#2c2825' }}>{tierLabel[recognizedGuest.tier] ?? recognizedGuest.tier}</strong>
+                {recognizedGuest.points != null && recognizedGuest.points >= 0 && (
+                  <> — نقاطك: <strong style={{ color: '#2c2825' }}>{recognizedGuest.points.toLocaleString('ar-SA')}</strong></>
+                )}
+              </p>
               {idLast ? (
                 <p className="text-center text-[0.9375rem] mb-2" style={mutedStyle}>
                   هل هذا هو رقم هويتك المنتهي بـ (***{idLast})؟

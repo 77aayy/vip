@@ -75,6 +75,19 @@ function findColIndex(row: unknown[], keys: string[]): number {
   return -1
 }
 
+/** مثل findColIndex لكن يطابق فقط عندما الخلية تحتوي على المفتاح (لا العكس) — لتفضيل «رقم الهوية» على «الهوية» */
+function findColIndexCellContains(row: unknown[], keys: string[]): number {
+  for (let i = 0; i < row.length; i++) {
+    const cell = normForMatch(str(row[i]))
+    if (!cell) continue
+    for (const k of keys) {
+      const kn = normForMatch(k)
+      if (kn.length > 0 && cell.includes(kn)) return i
+    }
+  }
+  return -1
+}
+
 export interface ParseMemberResult {
   rows: MemberRow[]
   rawDataRows: number
@@ -157,6 +170,35 @@ function findHeaderRow(rows: unknown[][]): number {
       }
     }
     if (matchCount >= 2) return r
+  }
+  return 0
+}
+
+/** البحث عن صف العناوين في ملف العملاء/الربط — قد يكون الصف 0 أو أي صف فيه «جوال» + «رقم الهوية» أو «الاسم» */
+function findHeaderRowForMapping(rows: unknown[][]): number {
+  const phoneKeys = ['رقم الجوال', 'جوال', 'الجوال', 'جوال العميل', 'هاتف', 'هاتف العميل', 'تليفون', 'رقم التليفون', 'phone', 'mobile', 'tel', 'رقم الموبايل']
+  const idOrNameKeys = ['رقم الهوية', 'الهوية', 'الاسم', 'إسم العميل', 'اسم العميل', 'اسم', 'name', 'identity', 'national_id']
+  for (let r = 0; r < Math.min(40, rows.length); r++) {
+    const row = (rows[r] || []) as unknown[]
+    let hasPhone = false
+    let hasIdOrName = false
+    for (const cell of row) {
+      const s = normForMatch(str(cell))
+      if (!s) continue
+      for (const k of phoneKeys) {
+        if (normForMatch(k).length > 0 && (s.includes(normForMatch(k)) || normForMatch(k).includes(s))) {
+          hasPhone = true
+          break
+        }
+      }
+      for (const k of idOrNameKeys) {
+        if (normForMatch(k).length > 0 && (s.includes(normForMatch(k)) || normForMatch(k).includes(s))) {
+          hasIdOrName = true
+          break
+        }
+      }
+    }
+    if (hasPhone && hasIdOrName) return r
   }
   return 0
 }
@@ -265,28 +307,41 @@ export interface MappingRow {
   phone: string
 }
 
-/** تحليل ملف الربط (رقم الهوية + جوال) — من تصدير نظام الفندق */
-export function parseMappingFile(file: File): Promise<MappingRow[]> {
+export interface ParseMappingResult {
+  rows: MappingRow[]
+  /** عدد صفوف البيانات في الملف (بدون صف العناوين) */
+  rawDataRows: number
+}
+
+/** تحليل ملف الربط (رقم الهوية + جوال) — من تصدير نظام الفندق أو ملف العملاء */
+export function parseMappingFile(file: File): Promise<ParseMappingResult> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
         const data = e.target?.result
-        if (!data) return resolve([])
+        if (!data) return resolve({ rows: [], rawDataRows: 0 })
         const wb = XLSX.read(data, { type: 'binary' })
         const first = wb.SheetNames[0]
-        if (!first) return resolve([])
+        if (!first) return resolve({ rows: [], rawDataRows: 0 })
         const ws = wb.Sheets[first]
         const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
         if (rows.length < 2) return reject(new Error('الملف فارغ. المطلوب: صف عناوين + صفوف بيانات.'))
-        const header = rows[0] as unknown[]
-        const phoneIdx = findColIndex(header, ['phone', 'جوال', 'الجوال', 'رقم', 'mobile', 'tel', 'رقم الجوال', 'رقم الموبايل', 'هاتف'])
-        const idIdx = findColIndex(header, ['رقم الهوية', 'رقمالهوية', 'id', 'هوية', 'identity', 'national_id'])
-        const nameIdx = findColIndex(header, ['إسم العميل', 'اسم العميل', 'اسم', 'name', 'الاسم'])
-        if (phoneIdx < 0) return reject(new Error('عمود الجوال غير موجود. المطلوب: عمود "جوال" أو "phone" أو "رقم".'))
+        const headerRowIdx = findHeaderRowForMapping(rows)
+        const header = (rows[headerRowIdx] || []) as unknown[]
+        // الجوال: رقم الجوال، جوال، phone، إلخ
+        const phoneIdx = findColIndex(header, ['رقم الجوال', 'جوال', 'الجوال', 'جوال العميل', 'هاتف', 'هاتف العميل', 'تليفون', 'رقم التليفون', 'phone', 'mobile', 'tel', 'رقم الموبايل'])
+        // رقم الهوية: عمود عنوانه يحتوي «رقم الهوية» (الرقم الفعلي) وليس مجرد «الهوية» (نوع الوثيقة)
+        let idIdx = findColIndexCellContains(header, ['رقم الهوية', 'رقمالهوية', 'identity', 'national_id'])
+        if (idIdx < 0) idIdx = findColIndex(header, ['هوية', 'id'])
+        // الاسم: الاسم، إسم العميل، name، إلخ
+        const nameIdx = findColIndex(header, ['الاسم', 'إسم العميل', 'اسم العميل', 'اسم', 'name'])
+        if (phoneIdx < 0) return reject(new Error('عمود الجوال غير موجود. المطلوب: عمود "جوال" أو "phone" أو "رقم الجوال".'))
         if (idIdx < 0 && nameIdx < 0) return reject(new Error('عمود رقم الهوية أو الاسم غير موجود. المطلوب للربط.'))
+        const dataStart = headerRowIdx + 1
+        const rawDataRows = rows.length - dataStart
         const out: MappingRow[] = []
-        for (let i = 1; i < rows.length; i++) {
+        for (let i = dataStart; i < rows.length; i++) {
           const row = rows[i] as unknown[]
           const phone = normalizePhone(row[phoneIdx])
           if (!phone || phone.length < 9) continue
@@ -294,7 +349,7 @@ export function parseMappingFile(file: File): Promise<MappingRow[]> {
           const name = nameIdx >= 0 ? str(row[nameIdx]) : undefined
           out.push({ phone, ...(idNum && idNum.length >= 9 && { idNumber: idNum }), ...(name && { name }) })
         }
-        resolve(out)
+        resolve({ rows: out, rawDataRows })
       } catch (err) {
         reject(err)
       }
@@ -302,6 +357,22 @@ export function parseMappingFile(file: File): Promise<MappingRow[]> {
     reader.onerror = () => reject(reader.error)
     reader.readAsBinaryString(file)
   })
+}
+
+/** دمج نتائج عدة ملفات عملاء/ربط — إزالة التكرار حسب رقم الجوال (الأول يربح) */
+export function mergeMappingResults(results: ParseMappingResult[]): ParseMappingResult {
+  const byPhone = new Map<string, MappingRow>()
+  let totalRawRows = 0
+  for (const { rows, rawDataRows } of results) {
+    totalRawRows += rawDataRows
+    for (const row of rows) {
+      const p = row.phone.replace(/\D/g, '').slice(-9)
+      if (p.length >= 9 && !byPhone.has(p)) {
+        byPhone.set(p, row)
+      }
+    }
+  }
+  return { rows: [...byPhone.values()], rawDataRows: totalRawRows }
 }
 
 /** تحويل نتيجة الاستيراد إلى RevenueRow[] مع ربط رقم الهوية أو الاسم بالجوال من قوائم الزبائن + ملف الربط */
