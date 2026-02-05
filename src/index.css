@@ -22,15 +22,21 @@ body {
   html {
     min-height: 100dvh;
     min-height: -webkit-fill-available;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   body {
     min-height: 100dvh;
     min-height: -webkit-fill-available;
     overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   #root {
     min-height: 100dvh;
     overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 

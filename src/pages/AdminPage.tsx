@@ -519,7 +519,7 @@ export function AdminPage() {
   }, [useFirestore, loadNewMembersLog])
 
   return (
-    <div className="min-h-dvh bg-surface text-white/90 font-arabic p-4 pb-8 safe-area-insets">
+    <div className="min-h-dvh bg-surface text-white/90 font-arabic p-4 pb-8 safe-area-insets max-md:max-h-dvh max-md:overflow-y-auto max-md:overflow-x-hidden max-md:[-webkit-overflow-scrolling:touch]">
       <div className="w-full max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl mx-auto min-w-0">
         <header className="flex flex-col items-center mb-6">
           <div className="bg-transparent inline-block">
