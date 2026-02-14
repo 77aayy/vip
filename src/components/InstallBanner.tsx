@@ -16,7 +16,11 @@ function isStandalone(): boolean {
 
 function isDismissed(): boolean {
   if (typeof localStorage === 'undefined') return true
-  return localStorage.getItem(STORAGE_KEY) === '1'
+  try {
+    return localStorage.getItem(STORAGE_KEY) === '1'
+  } catch {
+    return true
+  }
 }
 
 interface InstallBannerProps {
@@ -48,21 +52,29 @@ export function InstallBanner({ showAfterSpin = false }: InstallBannerProps) {
   }, [])
 
   const handleInstall = useCallback(() => {
+    const markDismissed = () => {
+      try {
+        localStorage.setItem(STORAGE_KEY, '1')
+      } catch {
+        // quota / private mode
+      }
+      setVisible(false)
+    }
     if (deferredPromptRef.current) {
       deferredPromptRef.current.prompt().then(({ outcome }) => {
-        if (outcome === 'accepted' || outcome === 'dismissed') {
-          localStorage.setItem(STORAGE_KEY, '1')
-          setVisible(false)
-        }
+        if (outcome === 'accepted' || outcome === 'dismissed') markDismissed()
       })
     } else {
-      localStorage.setItem(STORAGE_KEY, '1')
-      setVisible(false)
+      markDismissed()
     }
   }, [])
 
   const handleDismiss = useCallback(() => {
-    localStorage.setItem(STORAGE_KEY, '1')
+    try {
+      localStorage.setItem(STORAGE_KEY, '1')
+    } catch {
+      // quota / private mode
+    }
     setVisible(false)
   }, [])
 

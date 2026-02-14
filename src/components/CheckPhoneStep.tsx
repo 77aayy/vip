@@ -158,6 +158,19 @@ export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, register
                   <> — نقاطك: <strong style={{ color: '#2c2825' }}>{recognizedGuest.points.toLocaleString('ar-SA')}</strong></>
                 )}
               </p>
+              {recognizedGuest.pointsToNextTier != null && recognizedGuest.pointsToNextTier > 0 && recognizedGuest.tier !== 'platinum' && (
+                <p className="text-center text-[0.8125rem] mb-1" style={mutedStyle}>
+                  باقي <strong style={{ color: '#2c2825' }}>{recognizedGuest.pointsToNextTier.toLocaleString('ar-SA')}</strong> نقطة للوصول إلى{' '}
+                  <strong style={{ color: '#2c2825' }}>
+                    {recognizedGuest.tier === 'silver' ? 'الذهبي' : 'البلاتيني'}
+                  </strong>
+                </p>
+              )}
+              {recognizedGuest.tier === 'platinum' && (
+                <p className="text-center text-[0.8125rem] mb-1" style={mutedStyle}>
+                  أنت في أعلى فئة 🏆
+                </p>
+              )}
               {idLast ? (
                 <p className="text-center text-[0.9375rem] mb-2" style={mutedStyle}>
                   هل هذا هو رقم هويتك المنتهي بـ (***{idLast})؟

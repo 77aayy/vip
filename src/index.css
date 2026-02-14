@@ -9,15 +9,25 @@
 html {
   scroll-behavior: smooth;
   overflow-x: hidden;
+  width: 100%;
+  max-width: 100vw;
 }
 
 body {
   @apply font-arabic antialiased overflow-x-hidden;
   background-color: #0a0a0a;
   color: #fafafa;
+  width: 100%;
+  max-width: 100vw;
 }
 
-/* موبايل: منع السكرول الأفقي فقط — العمودي مسموح لرؤية الدائرة والأزرار كاملة */
+#root {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* موبايل: منع السكرول الأفقي — أولوية للعرض على الجوال */
 @media (max-width: 640px) {
   html {
     min-height: 100dvh;

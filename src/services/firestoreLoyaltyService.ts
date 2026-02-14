@@ -12,10 +12,14 @@ import {
   setDoc,
   addDoc,
   deleteDoc,
+  query,
+  orderBy,
+  limit as limitFn,
 } from 'firebase/firestore'
 import { firestoreDb } from './firebase'
 import { trackReads, trackWrites } from './firestoreUsageTracker'
 import type { MemberRow, RevenueRow, Settings, GuestLookup, Tier } from '@/types'
+import type { AuditLogEntry } from '@/services/auditLogService'
 import { defaultSettings } from './mockSettings'
 
 const BATCH_SIZE = 500
@@ -25,6 +29,7 @@ const COL_PLATINUM = 'members_platinum'
 const COL_REVENUE = 'revenue'
 const COL_CONFIG = 'config'
 const COL_NEW_MEMBERS = 'new_members'
+const COL_AUDIT = 'audit_log'
 const DOC_SETTINGS = 'settings'
 const DOC_PRIZE_USAGE = 'prize_usage'
 
@@ -363,6 +368,58 @@ export async function getCountsAsync(): Promise<{
   }
 }
 
+/** جلب كل سجلات الإيراد من Firestore (لدمج التحديث بمطابقة 100%). */
+export async function getRevenueRowsAsync(): Promise<RevenueRow[]> {
+  if (!firestoreDb) return []
+  const colRef = collection(firestoreDb, COL_REVENUE)
+  const snap = await getDocs(colRef)
+  trackReads(snap.size)
+  return snap.docs.map((d) => {
+    const data = d.data()
+    return {
+      phone: (data.phone as string) ?? d.id,
+      total_spent: (data.total_spent as number) ?? 0,
+    }
+  })
+}
+
+function docToMemberRow(d: { id: string; data: () => Record<string, unknown> }): MemberRow {
+  const data = d.data()
+  const idLastDigits = data.idLastDigits != null && data.idLastDigits !== '' ? String(data.idLastDigits) : undefined
+  const idNumber = data.idNumber != null && data.idNumber !== '' ? String(data.idNumber) : undefined
+  return {
+    phone: (data.phone as string) ?? d.id,
+    name: (data.name as string) ?? '',
+    total_spent: (data.total_spent as number) ?? 0,
+    ...(idLastDigits != null ? { idLastDigits } : {}),
+    ...(idNumber != null ? { idNumber } : {}),
+  }
+}
+
+/** جلب كل قائمة فضية من Firestore (للتصدير). */
+export async function getSilverRowsAsync(): Promise<MemberRow[]> {
+  if (!firestoreDb) return []
+  const snap = await getDocs(collection(firestoreDb, COL_SILVER))
+  trackReads(snap.size)
+  return snap.docs.map((d) => docToMemberRow(d))
+}
+
+/** جلب كل قائمة ذهبية من Firestore (للتصدير). */
+export async function getGoldRowsAsync(): Promise<MemberRow[]> {
+  if (!firestoreDb) return []
+  const snap = await getDocs(collection(firestoreDb, COL_GOLD))
+  trackReads(snap.size)
+  return snap.docs.map((d) => docToMemberRow(d))
+}
+
+/** جلب كل قائمة بلاتينية من Firestore (للتصدير). */
+export async function getPlatinumRowsAsync(): Promise<MemberRow[]> {
+  if (!firestoreDb) return []
+  const snap = await getDocs(collection(firestoreDb, COL_PLATINUM))
+  trackReads(snap.size)
+  return snap.docs.map((d) => docToMemberRow(d))
+}
+
 /** استخدام الجوائز من Firestore. */
 export async function getPrizeUsageAsync(): Promise<Record<string, number>> {
   if (!firestoreDb) return {}
@@ -496,4 +553,84 @@ export async function getMembersForRevenueResolveAsync(): Promise<
     }
   }
   return out
+}
+
+/** إدخال حدث في سجل التدقيق (رفع ملف / حفظ إعدادات). */
+export async function addAuditLogAsync(entry: {
+  action: 'upload' | 'settings'
+  key?: string
+  fileName?: string
+  count?: number
+  mergeCount?: number
+}): Promise<void> {
+  if (!firestoreDb) return
+  const colRef = collection(firestoreDb, COL_AUDIT)
+  await addDoc(colRef, { ...entry, at: Date.now() })
+  trackWrites(1)
+}
+
+/** جلب آخر أحداث سجل التدقيق (للعرض في لوحة الأدمن). */
+export async function getAuditLogAsync(limit: number = 50): Promise<(AuditLogEntry & { id: string })[]> {
+  if (!firestoreDb) return []
+  const colRef = collection(firestoreDb, COL_AUDIT)
+  const q = query(colRef, orderBy('at', 'desc'), limitFn(limit))
+  const snap = await getDocs(q)
+  trackReads(snap.size)
+  return snap.docs.map((d) => {
+    const data = d.data()
+    const action = data.action === 'settings' ? 'settings' : 'upload'
+    return {
+      id: d.id,
+      action,
+      key: data.key as string | undefined,
+      fileName: data.fileName as string | undefined,
+      count: data.count as number | undefined,
+      mergeCount: data.mergeCount as number | undefined,
+      at: (data.at as number) ?? 0,
+    }
+  })
+}
+
+const COL_SPIN_ELIGIBILITY = 'spin_eligibility'
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/** التحقق من صلاحية اللعب من Firestore (مصدر واحد عند عدم وجود checkEligibilityUrl). */
+export async function getSpinEligibilityAsync(phone: string): Promise<{
+  allowed: boolean
+  cooldownEndsAt?: number
+  lastPrize?: { prizeLabel: string; code: string }
+}> {
+  if (!firestoreDb) return { allowed: true }
+  const p = norm(phone)
+  if (!p) return { allowed: true }
+  const [settingsSnap, spinSnap] = await Promise.all([
+    getDoc(doc(firestoreDb, COL_CONFIG, DOC_SETTINGS)),
+    getDoc(doc(firestoreDb, COL_SPIN_ELIGIBILITY, p)),
+  ])
+  trackReads(2)
+  const settings = settingsSnap.exists() ? (settingsSnap.data() as Settings) : defaultSettings
+  const cooldownDays = Math.max(1, Math.min(365, Math.floor(settings.spinCooldownDays ?? 15)))
+  const cooldownMs = cooldownDays * MS_PER_DAY
+  if (!spinSnap.exists()) return { allowed: true }
+  const data = spinSnap.data()
+  const lastSpinAt = (data.lastSpinAt as number) ?? 0
+  const endsAt = lastSpinAt + cooldownMs
+  if (Date.now() >= endsAt) return { allowed: true }
+  const prizeLabel = (data.prizeLabel as string) ?? ''
+  const code = (data.code as string) ?? ''
+  return {
+    allowed: false,
+    cooldownEndsAt: endsAt,
+    ...(prizeLabel && code && { lastPrize: { prizeLabel, code } }),
+  }
+}
+
+/** تسجيل لفة ناجحة في Firestore (مصدر واحد للصلاحية). */
+export async function recordSpinInFirestoreAsync(phone: string, prizeLabel: string, code: string): Promise<void> {
+  if (!firestoreDb) return
+  const p = norm(phone)
+  if (!p) return
+  const ref = doc(firestoreDb, COL_SPIN_ELIGIBILITY, p)
+  await setDoc(ref, { lastSpinAt: Date.now(), prizeLabel, code })
+  trackWrites(1)
 }

@@ -1,7 +1,13 @@
-import { Component, type ReactNode } from 'react'
+import { Component, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { AdminPage } from '@/pages/AdminPage'
+import { AdminGate } from '@/components/AdminGate'
 import { GuestPage } from '@/pages/GuestPage'
+import {
+  isFirestoreAvailable,
+  getSettingsAsync,
+  getPrizeUsageAsync,
+} from '@/services/firestoreLoyaltyService'
+import { setSettings, setPrizeUsage } from '@/services/storage'
 
 class AdminErrorBoundary extends Component<
   { children: ReactNode },
@@ -29,14 +35,33 @@ class AdminErrorBoundary extends Component<
   }
 }
 
+/** عند توفر Firestore: تهيئة التخزين المحلي من السحابة مرة واحدة عند فتح التطبيق — ليكون مصدر الحقيقة واحد (Firestore) والقراءات المتزامنة (getSettings/getPrizeUsage) تعكس أحدث البيانات. */
+function useFirestoreHydrate(): void {
+  const [, setHydrated] = useState(0)
+  useEffect(() => {
+    if (!isFirestoreAvailable()) return
+    let cancelled = false
+    Promise.all([getSettingsAsync(), getPrizeUsageAsync()])
+      .then(([settings, prizeUsage]) => {
+        if (cancelled) return
+        setSettings(settings)
+        setPrizeUsage(prizeUsage)
+        setHydrated((n) => n + 1)
+      })
+      .catch(() => { /* لا نعطل التطبيق؛ التخزين المحلي يبقى المصدر */ })
+    return () => { cancelled = true }
+  }, [])
+}
+
 export default function App() {
+  useFirestoreHydrate()
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/" element={<GuestPage />} />
         <Route path="/admin" element={
           <AdminErrorBoundary>
-            <AdminPage />
+            <AdminGate />
           </AdminErrorBoundary>
         } />
       </Routes>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSound } from '@/hooks/useSound'
 
 interface CodeResultProps {
@@ -50,17 +50,28 @@ function ConfettiParticles() {
 export function CodeResult({ code, prizeLabel, guestName = '', onCopy: _onCopy, onWhatsApp }: CodeResultProps) {
   const [copied, setCopied] = useState(false)
   const { playCelebration } = useSound()
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     playCelebration()
   }, [playCelebration])
 
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current != null) clearTimeout(copyResetTimerRef.current)
+    }
+  }, [])
+
   const handleCopy = () => {
+    if (copyResetTimerRef.current != null) clearTimeout(copyResetTimerRef.current)
     navigator.clipboard
       .writeText(code)
       .then(() => {
         setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
+        copyResetTimerRef.current = setTimeout(() => {
+          copyResetTimerRef.current = null
+          setCopied(false)
+        }, 2000)
       })
       .catch(() => {
         setCopied(false)

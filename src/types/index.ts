@@ -7,6 +7,8 @@ export interface Prize {
   maxWins?: number
   /** true = الجائزة لا تنتهي (عدد لا نهائي من المرات) */
   unlimited?: boolean
+  /** true = نسبة هذه الجائزة ثابتة ولا تُغيّر عند إعادة توزيع النسب */
+  fixedPercent?: boolean
 }
 
 export type Tier = 'silver' | 'gold' | 'platinum'
@@ -40,8 +42,18 @@ export interface Settings {
   exportWebhookUrl?: string
   /** اختياري: رابط للتحقق من أهلية اللعب (رقم لم يلعب اليوم) — العجلة لا تبدأ إلا بعد تأكيد السيرفر */
   checkEligibilityUrl?: string
+  /** مدة الحظر بين كل لفة وأخرى (بالأيام) — من لوحة الأدمن، افتراضي 15 */
+  spinCooldownDays?: number
+  /** مدة دوران العجلة حتى التوقف (ثانية) — من لوحة الأدمن، افتراضي 22 */
+  wheelDurationSec?: number
+  /** عدد اللفات الكاملة (360°) قبل التوقف — من لوحة الأدمن، افتراضي 3 */
+  wheelSpinCount?: number
+  /** التأخير بعد توقف العجلة حتى ظهور شاشة الجائزة (ثانية) — من لوحة الأدمن، افتراضي 2.2 */
+  delayBeforePrizeSec?: number
   /** اختياري: رابط انستجرام (أو أي سوشال) يظهر بعد نجاح الإرسال للاستقبال — "تابعنا للاطلاع على عروضنا" */
   instagramUrl?: string
+  /** نصوص شروط وأحكام (سطر واحد = بند) — تظهر في نافذة «شروط وأحكام» في صفحة الضيف */
+  termsText?: string
   messages: {
     silver: string
     gold: string

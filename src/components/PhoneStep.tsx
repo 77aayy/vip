@@ -210,6 +210,15 @@ export function PhoneStep({
     return (
       <div className="w-full max-w-sm mx-auto py-6 animate-fade-in">
         <div className="rounded-2xl p-5 space-y-3 shadow-lg" style={cardStyle}>
+          <div className="rounded-xl p-3 text-center border border-amber-200/80 bg-amber-50/70" style={{ borderColor: 'rgba(217,119,6,0.4)' }}>
+            <p className="text-[0.875rem] font-medium" style={textStyle}>
+              نقاطك: <strong>{guest.points.toLocaleString('ar-SA')}</strong>
+              {guest.pointsToNextTier != null && guest.pointsToNextTier > 0 && guest.tier !== 'platinum' && (
+                <> — باقي <strong>{guest.pointsToNextTier.toLocaleString('ar-SA')}</strong> نقطة للوصول إلى {guest.tier === 'silver' ? 'الذهبي' : 'البلاتيني'}</>
+              )}
+              {guest.tier === 'platinum' && <> — أنت في أعلى فئة 🏆</>}
+            </p>
+          </div>
           <div className="rounded-xl p-3.5 text-center border-2 bg-amber-50/85" style={{ borderColor: 'rgba(217,119,6,0.55)' }}>
             <p className="font-medium text-[0.9375rem] leading-relaxed" style={textStyle}>
               {displayMsg}

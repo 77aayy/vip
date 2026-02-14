@@ -1,3 +1,8 @@
+/**
+ * التخزين المحلي (localStorage) — مصدر القراءة/الكتابة المتزامن.
+ * قاعدة المصدر: إن وُجد Firestore فهو مصدر الحقيقة؛ يتم تهيئة التخزين المحلي منه عند فتح التطبيق (App)
+ * وأي حفظ من الأدمن يكتب إلى الاثنين. إن لم يُهيّأ Firestore فالتخزين المحلي هو المصدر الوحيد.
+ */
 import type { MemberRow, RevenueRow, Settings, StoredData } from '@/types'
 import type { RevenueParseRow } from './excelParser'
 import { defaultSettings } from './mockSettings'
@@ -76,21 +81,29 @@ export function getNewMembersLog(): NewMemberLogEntry[] {
 }
 
 export function addNewMemberLog(phone: string, name: string, idLastDigits?: string): void {
-  const list = getNewMembersRaw()
-  const normalized = phone.replace(/\D/g, '').slice(-9)
-  const entry: NewMemberLogEntry = {
-    id: `local-${Date.now()}-${normalized}`,
-    phone: normalized,
-    name: name.trim(),
-    ...(idLastDigits != null && idLastDigits !== '' && { idLastDigits: idLastDigits.replace(/\D/g, '').slice(-4) }),
-    createdAt: Date.now(),
+  try {
+    const list = getNewMembersRaw()
+    const normalized = phone.replace(/\D/g, '').slice(-9)
+    const entry: NewMemberLogEntry = {
+      id: `local-${Date.now()}-${normalized}`,
+      phone: normalized,
+      name: name.trim(),
+      ...(idLastDigits != null && idLastDigits !== '' && { idLastDigits: idLastDigits.replace(/\D/g, '').slice(-4) }),
+      createdAt: Date.now(),
+    }
+    list.push(entry)
+    localStorage.setItem(KEY_NEW_MEMBERS, JSON.stringify(list))
+  } catch {
+    // quota / private mode / disabled storage
   }
-  list.push(entry)
-  localStorage.setItem(KEY_NEW_MEMBERS, JSON.stringify(list))
 }
 
 export function clearNewMembersLog(): void {
-  localStorage.removeItem(KEY_NEW_MEMBERS)
+  try {
+    localStorage.removeItem(KEY_NEW_MEMBERS)
+  } catch {
+    // quota / private mode / disabled storage
+  }
 }
 
 function getStored(): StoredData {
@@ -127,33 +140,53 @@ export function getStorage(): StoredData {
 }
 
 export function setSilver(rows: MemberRow[]): void {
-  const d = getStored()
-  d.silver = rows
-  localStorage.setItem(KEY, JSON.stringify(d))
+  try {
+    const d = getStored()
+    d.silver = rows
+    localStorage.setItem(KEY, JSON.stringify(d))
+  } catch {
+    // quota / private mode / disabled storage
+  }
 }
 
 export function setGold(rows: MemberRow[]): void {
-  const d = getStored()
-  d.gold = rows
-  localStorage.setItem(KEY, JSON.stringify(d))
+  try {
+    const d = getStored()
+    d.gold = rows
+    localStorage.setItem(KEY, JSON.stringify(d))
+  } catch {
+    // quota / private mode / disabled storage
+  }
 }
 
 export function setPlatinum(rows: MemberRow[]): void {
-  const d = getStored()
-  d.platinum = rows
-  localStorage.setItem(KEY, JSON.stringify(d))
+  try {
+    const d = getStored()
+    d.platinum = rows
+    localStorage.setItem(KEY, JSON.stringify(d))
+  } catch {
+    // quota / private mode / disabled storage
+  }
 }
 
 export function setRevenue(rows: RevenueRow[]): void {
-  const d = getStored()
-  d.revenue = rows
-  localStorage.setItem(KEY, JSON.stringify(d))
+  try {
+    const d = getStored()
+    d.revenue = rows
+    localStorage.setItem(KEY, JSON.stringify(d))
+  } catch {
+    // quota / private mode / disabled storage
+  }
 }
 
 export function setSettings(settings: Settings): void {
-  const d = getStored()
-  d.settings = settings
-  localStorage.setItem(KEY, JSON.stringify(d))
+  try {
+    const d = getStored()
+    d.settings = settings
+    localStorage.setItem(KEY, JSON.stringify(d))
+  } catch {
+    // quota / private mode / disabled storage
+  }
 }
 
 export function getSettings(): Settings {
@@ -200,10 +233,25 @@ export function getPrizeUsage(): Record<string, number> {
   return getStored().prizeUsage ?? {}
 }
 
+/** استبدال عدّ استخدام الجوائز (مثلاً بعد التهيئة من Firestore). */
+export function setPrizeUsage(usage: Record<string, number>): void {
+  try {
+    const d = getStored()
+    d.prizeUsage = usage ?? {}
+    localStorage.setItem(KEY, JSON.stringify(d))
+  } catch {
+    // quota / private mode / disabled storage
+  }
+}
+
 export function incrementPrizeUsage(prizeId: string): void {
-  const d = getStored()
-  const usage = { ...(d.prizeUsage ?? {}) }
-  usage[prizeId] = (usage[prizeId] ?? 0) + 1
-  d.prizeUsage = usage
-  localStorage.setItem(KEY, JSON.stringify(d))
+  try {
+    const d = getStored()
+    const usage = { ...(d.prizeUsage ?? {}) }
+    usage[prizeId] = (usage[prizeId] ?? 0) + 1
+    d.prizeUsage = usage
+    localStorage.setItem(KEY, JSON.stringify(d))
+  } catch {
+    // quota / private mode / disabled storage
+  }
 }

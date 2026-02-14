@@ -11,32 +11,43 @@ import {
   isFirestoreAvailable,
   addSilverMemberAsync,
   incrementPrizeUsageAsync,
+  getSpinEligibilityAsync,
+  recordSpinInFirestoreAsync,
 } from '@/services/firestoreLoyaltyService'
 import { exportNewGuest, flushPendingExports } from '@/services/guestExport'
 import { getPendingPrize, setPendingPrize, clearPendingPrize } from '@/services/guestPending'
-import { getWheelSpun, getLastPrize, setWheelSpun } from '@/services/wheelSpunStorage'
-import { checkSpinEligibility } from '@/services/spinEligibility'
+import { getWheelSpun, getLastPrize, setWheelSpun, getCooldownEndsAt } from '@/services/wheelSpunStorage'
+import { checkSpinEligibility, recordSpinOnServer } from '@/services/spinEligibility'
 import { appendVerificationSuffix } from '@/utils/whatsappMessage'
 import type { GuestLookup, Prize } from '@/types'
 import { PreviousPrizeStep } from '@/components/PreviousPrizeStep'
 import { InstallBanner } from '@/components/InstallBanner'
 
-const TERMS_ITEMS: string[] = [
-  'المشاركة في النظام مجانية تماماً ولا تتطلب أي دفع.',
-  'النظام هو أداة لمكافأه نزلاء إليت الاوفياء.',
-  'الجوائز غير نقدية ولا يمكن استبدالها بأموال.',
-  'رقم الجوال هو هوية المستخدم داخل النظام.',
-  'كل رقم جوال مسموح له بعدد محدود من المحاولات (مره واحده كل 15 يوم).',
-  'أي محاولة تحايل أو استخدام بيانات مزيفة تؤدي إلى إلغاء المشاركة.',
-  'الجوائز تصرف فقط باستخدام كود تحقق فريد صالح للاستخدام مرة واحدة.',
-  'يتم تسليم الكود للاستقبال فور الفوز به من خلال الاتس اب.',
-  'صلاحي الكود 3 شهور من تاريخ ارساله واتس اب للفندق.',
-  'العضويات (فضي، ذهبي، بلاتيني) والنقاط تخضع لخصومات و قواعد يحددها الفندق.',
-  'النقاط لا يمكن بيعها أو تحويلها أو سحبها نقدياً.',
-  'الفندق يحتفظ بحق تعديل: الجوائز، نسب الفوز، شروط الترقية، قواعد الاستخدام، في أي وقت.',
-  'يتم جمع البيانات (الاسم، الجوال، الهوية إن وُجدت) لأغراض اضافتك لبرنامج الولاء فقط.',
-  'الفندق غير مسؤول عن: عدم استخدامك للكود فى الفتره المخصصه له 3 شهور؛ عدم ارسالك للكود بعدد الفوز به مباشره؛ أعطال الإنترنت؛ مشاكل واتساب؛ سوء استخدام الكود من العميل.',
-]
+/** بنود الشروط والأحكام من الإعدادات (سطر = بند)، أو الافتراضي إن لم يُضبط */
+function getTermsItems(termsText: string | undefined): string[] {
+  if (termsText?.trim()) {
+    return termsText
+      .split(/\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+  }
+  return [
+    'المشاركة في النظام مجانية تماماً ولا تتطلب أي دفع.',
+    'النظام هو أداة لمكافأه نزلاء إليت الاوفياء.',
+    'الجوائز غير نقدية ولا يمكن استبدالها بأموال.',
+    'رقم الجوال هو هوية المستخدم داخل النظام.',
+    'كل رقم جوال مسموح له بعدد محدود من المحاولات (مره واحده كل 15 يوم).',
+    'أي محاولة تحايل أو استخدام بيانات مزيفة تؤدي إلى إلغاء المشاركة.',
+    'الجوائز تصرف فقط باستخدام كود تحقق فريد صالح للاستخدام مرة واحدة.',
+    'يتم تسليم الكود للاستقبال فور الفوز به من خلال الاتس اب.',
+    'صلاحي الكود 3 شهور من تاريخ ارساله واتس اب للفندق.',
+    'العضويات (فضي، ذهبي، بلاتيني) والنقاط تخضع لخصومات و قواعد يحددها الفندق.',
+    'النقاط لا يمكن بيعها أو تحويلها أو سحبها نقدياً.',
+    'الفندق يحتفظ بحق تعديل: الجوائز، نسب الفوز، شروط الترقية، قواعد الاستخدام، في أي وقت.',
+    'يتم جمع البيانات (الاسم، الجوال، الهوية إن وُجدت) لأغراض اضافتك لبرنامج الولاء فقط.',
+    'الفندق غير مسؤول عن: عدم استخدامك للكود فى الفتره المخصصه له 3 شهور؛ عدم ارسالك للكود بعدد الفوز به مباشره؛ أعطال الإنترنت؛ مشاكل واتساب؛ سوء استخدام الكود من العميل.',
+  ]
+}
 
 /** كود تحقق فريد — يستخدم crypto.getRandomValues لمقاومة التوقّع والتلاعب */
 function generateCode(): string {
@@ -71,6 +82,7 @@ export function GuestPage() {
   const [targetWinnerIndex, setTargetWinnerIndex] = useState<number | null>(null)
   const [spinProgress, setSpinProgress] = useState(0)
   const [termsOpen, setTermsOpen] = useState(false)
+  const [cooldownEndsAt, setCooldownEndsAt] = useState<number | null>(null)
   const currentSpinPhoneRef = useRef('')
   const { playWin, playSuccess } = useSound()
   const settings = getSettings()
@@ -87,11 +99,20 @@ export function GuestPage() {
       })
   }, [settings.prizes, prizeUsage])
 
+  /** اختيار الجائزة حسب النسب — مرجّح بـ percent (لو المجموع 0 نستخدم توزيع متساوٍ) */
   const pickWinnerIndex = useCallback((): number => {
     const indices = availableIndices
     if (indices.length === 0) return 0
-    return indices[Math.floor(Math.random() * indices.length)]
-  }, [availableIndices])
+    const totalWeight = indices.reduce((sum, i) => sum + (settings.prizes[i]?.percent ?? 0), 0)
+    if (totalWeight <= 0) return indices[Math.floor(Math.random() * indices.length)]
+    let r = Math.random() * totalWeight
+    for (const i of indices) {
+      const w = settings.prizes[i]?.percent ?? 0
+      if (r < w) return i
+      r -= w
+    }
+    return indices[indices.length - 1]
+  }, [availableIndices, settings.prizes])
 
   const handleSpinEnd = useCallback((prize: Prize) => {
     setTargetWinnerIndex(null)
@@ -104,9 +125,14 @@ export function GuestPage() {
     if (isFirestoreAvailable()) void incrementPrizeUsageAsync(prize.id)
     setPendingPrize({ prizeLabel: prize.label, code })
     const phone = currentSpinPhoneRef.current
-    if (phone) setWheelSpun(phone, prize.label, code)
+    if (phone) {
+      setWheelSpun(phone, prize.label, code)
+      if (getSettings().checkEligibilityUrl?.trim()) void recordSpinOnServer(phone)
+      if (isFirestoreAvailable()) void recordSpinInFirestoreAsync(phone, prize.label, code)
+    }
     playWin()
-    setTimeout(() => setPhase('code'), 2200)
+    const delayMs = Math.max(1000, Math.min(6000, (getSettings().delayBeforePrizeSec ?? 2.2) * 1000))
+    setTimeout(() => setPhase('code'), delayMs)
   }, [playWin])
 
   const handleSpinRequest = useCallback(() => {
@@ -146,28 +172,68 @@ export function GuestPage() {
     async (phone: string) => {
       setEligibilityError('')
       const found = await lookupGuestAsync(phone)
-      if (found) {
-        if (getWheelSpun(phone)) {
-          const last = getLastPrize(phone)
-          if (last) {
-            setCheckedGuest(found)
-            setPreviousPrizeData(last)
-            setPhase('previous-prize')
-          } else {
-            setCheckedGuest(found)
-            currentSpinPhoneRef.current = found.phone
-            setPhase('wheel-loading')
+      if (!found) return
+
+      const hasServerCheck = Boolean(getSettings().checkEligibilityUrl?.trim())
+
+      if (hasServerCheck) {
+        const { allowed, message, cooldownEndsAt: serverEndsAt } = await checkSpinEligibility(phone)
+        if (!allowed) {
+          setEligibilityError(message ?? 'لا يمكنك اللعب الآن')
+          setCheckedGuest(found)
+          setPreviousPrizeData(getLastPrize(phone) ?? null)
+          const endsAt = typeof serverEndsAt === 'number' ? serverEndsAt : getCooldownEndsAt(phone)
+          if (typeof endsAt === 'number' && endsAt > Date.now()) {
+            setCooldownEndsAt(endsAt)
+            setPhase('wheel')
           }
+          return
+        }
+        setCheckedGuest(found)
+        currentSpinPhoneRef.current = found.phone
+        setPhase('wheel-loading')
+        return
+      }
+
+      if (isFirestoreAvailable()) {
+        const { allowed, cooldownEndsAt: firestoreEndsAt, lastPrize: firestoreLastPrize } = await getSpinEligibilityAsync(phone)
+        if (!allowed) {
+          setEligibilityError('لا يمكنك اللعب الآن — لم تنتهِ مدة الحظر بعد')
+          setCheckedGuest(found)
+          setPreviousPrizeData(firestoreLastPrize ?? getLastPrize(phone) ?? null)
+          if (typeof firestoreEndsAt === 'number' && firestoreEndsAt > Date.now()) {
+            setCooldownEndsAt(firestoreEndsAt)
+            setPhase('wheel')
+          }
+          return
+        }
+        setCheckedGuest(found)
+        currentSpinPhoneRef.current = found.phone
+        setPhase('wheel-loading')
+        return
+      }
+
+      if (getWheelSpun(phone)) {
+        const last = getLastPrize(phone)
+        const endsAt = getCooldownEndsAt(phone)
+        if (last && typeof endsAt === 'number' && endsAt > Date.now()) {
+          setCheckedGuest(found)
+          setPreviousPrizeData(last)
+          setCooldownEndsAt(endsAt)
+          setPhase('wheel')
+        } else if (last) {
+          setCheckedGuest(found)
+          setPreviousPrizeData(last)
+          setPhase('previous-prize')
         } else {
-          const { allowed, message } = await checkSpinEligibility(phone)
-          if (!allowed) {
-            setEligibilityError(message ?? 'لا يمكنك اللعب الآن')
-            return
-          }
           setCheckedGuest(found)
           currentSpinPhoneRef.current = found.phone
           setPhase('wheel-loading')
         }
+      } else {
+        setCheckedGuest(found)
+        currentSpinPhoneRef.current = found.phone
+        setPhase('wheel-loading')
       }
     },
     [],
@@ -271,35 +337,39 @@ export function GuestPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] flex flex-col overflow-x-hidden page-bg-leather sm:min-h-screen">
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center min-h-0 safe-area-insets pt-2 pb-6 px-2 sm:pt-6 sm:pb-10 sm:px-4">
-        <div className="w-full max-w-[432px] min-w-0 mx-auto flex flex-col items-center">
-        <header className="w-full flex-shrink-0 mb-2 sm:mb-6">
+    <div className="min-h-[100dvh] flex flex-col overflow-x-hidden page-bg-leather sm:min-h-screen w-full max-w-[100vw]">
+      <main className="relative z-10 flex-1 flex flex-col items-center min-h-0 min-w-0 safe-area-insets pt-2 pb-6 px-2 sm:pt-6 sm:pb-10 sm:px-4 overflow-y-auto overflow-x-hidden w-full max-w-[100vw]">
+        <div className="w-full max-w-[432px] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl min-w-0 mx-auto flex flex-col items-center overflow-x-hidden">
+        <header className="fixed top-0 left-0 right-0 z-20 w-full max-w-[100vw] flex-shrink-0 overflow-x-hidden sm:relative sm:top-auto sm:left-auto sm:right-auto pt-2 pb-2 sm:pt-6 sm:pb-0 sm:-mt-6 sm:mb-6" style={{ background: '#d9c9a8' }}>
+          <div className="w-full max-w-[432px] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl min-w-0 mx-auto px-2 sm:px-4">
           <div
-            className="w-full flex flex-row items-center gap-2 sm:gap-3 px-2 py-2 sm:px-4 sm:py-3.5 rounded-xl sm:rounded-2xl"
+            className="w-full flex flex-row items-center gap-2 sm:gap-3 py-2 sm:py-3.5 rounded-xl sm:rounded-2xl"
             dir="rtl"
             style={{
-              background: 'linear-gradient(145deg, rgba(255,255,255,0.85) 0%, rgba(248,248,246,0.6) 100%)',
+              background: 'linear-gradient(145deg, #e2d9c4 0%, #d9c9a8 50%, #d0c0a0 100%)',
               border: '1px solid rgba(212,175,55,0.4)',
-              boxShadow: '0 6px 24px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.9)',
+              boxShadow: '0 6px 24px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.25)',
             }}
           >
             <span
-              className="inline-flex flex-shrink-0 items-center justify-center"
+              className="inline-flex flex-shrink-0 items-center justify-center rounded-lg overflow-hidden"
               style={{
-                background: '#e6e0d6',
+                background: '#d9c9a8',
                 isolation: 'isolate',
+                padding: '2px 6px',
               }}
             >
               <img
                 src="/logo-1.png"
                 alt="Elite"
-                className="h-11 w-auto max-w-[90px] sm:h-20 sm:max-w-[180px] object-contain"
+                className="h-11 w-auto max-w-[90px] sm:h-20 sm:max-w-[180px] object-contain block"
                 decoding="async"
                 style={{
                   display: 'block',
+                  verticalAlign: 'middle',
                   filter: 'sepia(0.85) hue-rotate(328deg) saturate(2.2) brightness(1.15) contrast(1.05)',
                   mixBlendMode: 'multiply',
+                  backgroundColor: '#d9c9a8',
                 }}
               />
             </span>
@@ -307,22 +377,24 @@ export function GuestPage() {
               <button
                 type="button"
                 onClick={() => setTermsOpen(true)}
-                className="absolute top-0 left-0 w-8 h-8 rounded-lg flex items-center justify-center touch-manipulation transition-transform active:scale-95"
+                className="absolute top-0 left-0 rounded-lg flex items-center gap-1.5 px-2 py-1.5 touch-manipulation transition-transform active:scale-95 text-[0.75rem] sm:text-[0.8125rem] font-medium"
                 style={{
                   background: 'rgba(212,175,55,0.2)',
                   border: '1px solid rgba(212,175,55,0.4)',
                   color: '#8b6914',
+                  fontFamily: 'Tajawal, Cairo, sans-serif',
                 }}
                 title="شروط وأحكام"
                 aria-label="شروط وأحكام"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                   <polyline points="14 2 14 8 20 8" />
                   <line x1="16" y1="13" x2="8" y2="13" />
                   <line x1="16" y1="17" x2="8" y2="17" />
                   <polyline points="10 9 9 9 8 9" />
                 </svg>
+                <span>شروط وأحكام</span>
               </button>
               <div
                 className="w-10 h-px mx-auto mb-2 rounded-full"
@@ -357,7 +429,9 @@ export function GuestPage() {
               />
             </div>
           </div>
+          </div>
         </header>
+        <div className="h-[72px] flex-shrink-0 sm:h-0 sm:min-h-0 sm:overflow-hidden" aria-hidden />
 
         {termsOpen && (
           <div
@@ -372,7 +446,7 @@ export function GuestPage() {
               aria-hidden
             />
             <div
-              className="relative w-full max-h-[85vh] sm:max-h-[80vh] max-w-[400px] rounded-t-2xl sm:rounded-2xl flex flex-col bg-white shadow-xl overflow-hidden"
+              className="relative w-full max-h-[85vh] sm:max-h-[85vh] md:max-h-[90vh] max-w-[400px] sm:max-w-xl md:max-w-2xl lg:max-w-3xl rounded-t-2xl sm:rounded-2xl flex flex-col bg-white shadow-xl overflow-hidden"
               style={{
                 border: '1px solid rgba(212,175,55,0.3)',
                 boxShadow: '0 -4px 24px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05)',
@@ -398,12 +472,14 @@ export function GuestPage() {
                   </svg>
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ fontFamily: 'Tajawal, Cairo, sans-serif', fontSize: '0.8125rem', color: '#374151', lineHeight: 1.65 }}>
-                {TERMS_ITEMS.map((text, i) => (
-                  <p key={i} className="text-justify">
-                    {text}
-                  </p>
-                ))}
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 text-[0.8125rem] sm:text-sm md:text-base" style={{ fontFamily: 'Tajawal, Cairo, sans-serif', color: '#374151', lineHeight: 1.65 }}>
+                <ul className="list-disc list-inside space-y-3 ps-1">
+                  {getTermsItems(settings.termsText).map((text, i) => (
+                    <li key={i} className="text-justify">
+                      {text}
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           </div>
@@ -439,9 +515,9 @@ export function GuestPage() {
         )}
 
         {phase === 'wheel' && !pendingPrizeBanner && (
-          <div className="flex-1 flex flex-col min-w-0 overflow-visible">
+          <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden w-full">
             {availableIndices.length === 0 && (
-              <p className="text-center text-amber-800 bg-amber-100/90 rounded-xl px-3 py-2 sm:px-4 sm:py-3 max-w-[432px] mx-auto mb-2 sm:mb-4 text-sm" data-testid="msg-no-prizes">
+              <p className="text-center text-amber-800 bg-amber-100/90 rounded-xl px-3 py-2 sm:px-4 sm:py-3 w-full max-w-[432px] sm:max-w-2xl mx-auto mb-2 sm:mb-4 text-sm" data-testid="msg-no-prizes">
                 انتهت الجوائز المؤقتاً. الرجاء مراجعة الإعدادات من لوحة التحكم.
               </p>
             )}
@@ -496,8 +572,12 @@ export function GuestPage() {
               triggerSpin={triggerSpinAt}
               targetWinnerIndex={targetWinnerIndex}
               onSpinClick={allowSpinWithoutCheck ? handleSpinClick : undefined}
+              cooldownEndsAt={phase === 'wheel' ? cooldownEndsAt : null}
+              onShowPreviousPrize={cooldownEndsAt != null && previousPrizeData != null ? () => setPhase('previous-prize') : undefined}
               onSpinProgress={allowSpinWithoutCheck ? setSpinProgress : undefined}
               guestName={checkedGuest?.name ?? lastRegisteredGuest?.name ?? ''}
+              durationMs={Math.max(8000, Math.min(60000, (settings.wheelDurationSec ?? 22) * 1000))}
+              spinCount={Math.max(2, Math.min(10, Math.floor(settings.wheelSpinCount ?? 3)))}
             />
           </div>
         )}

@@ -65,5 +65,10 @@ export const firestoreDb = getDb()
 /** نسخة Storage — للرفع/التخزين. لو null معناه Firebase غير مُعدّ. */
 export const firebaseStorage = getStorageInstance()
 
-/** التطبيق المُهيّأ (للاستخدام المتقدم مثل Auth لاحقاً). */
+/** التطبيق المُهيّأ (للاستخدام المتقدم مثل Auth، Functions). */
 export const firebaseApp = app
+
+/** للحصول على التطبيق بعد التهيئة (مثلاً لـ Cloud Functions). */
+export function getFirebaseApp(): FirebaseApp | null {
+  return initFirebase()
+}

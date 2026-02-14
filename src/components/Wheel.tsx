@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
 import { useSound } from '@/hooks/useSound'
 import { cubicBezierEaseOut } from '@/utils/easing'
 import type { Prize } from '@/types'
@@ -12,6 +11,28 @@ const SEGMENT_COLORS = [
   '#f5f0e6',
   '#e0d5c4',
 ]
+
+const MS_PER_SECOND = 1000
+const MS_PER_MINUTE = 60 * MS_PER_SECOND
+const MS_PER_HOUR = 60 * MS_PER_MINUTE
+const MS_PER_DAY = 24 * MS_PER_HOUR
+
+function formatCooldownRemaining(endsAt: number): string {
+  const remaining = Math.max(0, endsAt - Date.now())
+  const days = Math.floor(remaining / MS_PER_DAY)
+  const rest1 = remaining % MS_PER_DAY
+  const hours = Math.floor(rest1 / MS_PER_HOUR)
+  const rest2 = rest1 % MS_PER_HOUR
+  const minutes = Math.floor(rest2 / MS_PER_MINUTE)
+  const rest3 = rest2 % MS_PER_MINUTE
+  const seconds = Math.floor(rest3 / MS_PER_SECOND)
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days} يوم`)
+  if (hours > 0) parts.push(`${hours} ساعة`)
+  if (minutes > 0) parts.push(`${minutes} دقيقة`)
+  parts.push(`${seconds} ثانية`)
+  return parts.join(' ')
+}
 
 interface WheelProps {
   prizes: Prize[]
@@ -35,6 +56,14 @@ interface WheelProps {
   onSpinProgress?: (progress: number) => void
   /** اسم الضيف — للمخاطبة أثناء الدوران (هديتك في الطريق يا [الاسم]...) */
   guestName?: string
+  /** وقت انتهاء حظر الدوران (مللي ثانية) — عند وجوده يُعرض تايمر ويُعطّل الزر */
+  cooldownEndsAt?: number | null
+  /** عند وجود حظر: زر "إرسال الجائزة للاستقبال مرة أخرى" ينتقل لشاشة إعادة الإرسال */
+  onShowPreviousPrize?: () => void
+  /** مدة الدوران حتى التوقف (مللي ثانية) — من إعدادات الأدمن */
+  durationMs?: number
+  /** عدد اللفات الكاملة (360°) قبل التوقف — من إعدادات الأدمن */
+  spinCount?: number
 }
 
 export function Wheel({
@@ -50,14 +79,41 @@ export function Wheel({
   onSpinClick,
   onSpinProgress,
   guestName = '',
+  cooldownEndsAt = null,
+  onShowPreviousPrize,
+  durationMs = 22000,
+  spinCount = 3,
 }: WheelProps) {
   const [rotation, setRotation] = useState(0)
   const [spinning, setSpinning] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
   const { playTick } = useSound()
   const lastTickedSegment = useRef(-1)
   const lastTriggerSpin = useRef(0)
   const onSpinProgressRef = useRef(onSpinProgress)
+  const wheelRotateRef = useRef<HTMLDivElement>(null)
+  const spinRafId = useRef<number | null>(null)
+  const spinCancelled = useRef(false)
   onSpinProgressRef.current = onSpinProgress
+
+  const cooldownActive = typeof cooldownEndsAt === 'number' && cooldownEndsAt > 0 && cooldownEndsAt > now
+
+  useEffect(() => {
+    spinCancelled.current = false
+    return () => {
+      spinCancelled.current = true
+      if (spinRafId.current != null) {
+        cancelAnimationFrame(spinRafId.current)
+        spinRafId.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!cooldownActive) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [cooldownActive])
 
   useEffect(() => {
     if (triggerSpin > 0 && triggerSpin !== lastTriggerSpin.current && !spinning) {
@@ -67,7 +123,7 @@ export function Wheel({
   }, [triggerSpin, spinning])
 
   const segmentAngle = 360 / prizes.length
-  const segmentFontSize = prizes.length > 12 ? 12 : prizes.length > 10 ? 13.5 : 15
+  const segmentFontSize = prizes.length > 12 ? 14 : prizes.length > 10 ? 16 : 18
   const isNarrow = typeof window !== 'undefined' && window.innerWidth < 400
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640
   const rimWidth = 12
@@ -89,7 +145,7 @@ export function Wheel({
   const cx = innerSize / 2
   const cy = innerSize / 2
   const segmentRadius = innerSize / 2 - 6
-  const textRadius = segmentRadius - 40
+  const textRadius = segmentRadius - 44
 
   const segments = useMemo(() => {
     return prizes.map((p, i) => {
@@ -105,7 +161,7 @@ export function Wheel({
       if (angleToCenterDeg < 0) angleToCenterDeg += 360
       const textRotation = (angleToCenterDeg + 180) % 360
       const label = p.label
-      const maxCharsPerLine = prizes.length > 12 ? 6 : prizes.length > 10 ? 7 : 9
+      const maxCharsPerLine = prizes.length > 12 ? 4 : prizes.length > 10 ? 5 : 6
       const parts = label.split(/\s+/).filter(Boolean)
       let displayLabelLines: string[]
       if (parts.length === 0) {
@@ -164,17 +220,27 @@ export function Wheel({
         ? targetWinnerIndex
         : canPick[Math.floor(Math.random() * canPick.length)]
     const winnerMidAngle = winnerIndex * segmentAngle + segmentAngle / 2
-    const extraTurns = 3
+    const turns = Math.max(2, Math.min(10, Math.floor(spinCount)))
     const currentMod = ((rotation % 360) + 360) % 360
     const targetAngle = isRtl ? (360 - winnerMidAngle) % 360 : winnerMidAngle
     const offsetToWinner = (targetAngle - currentMod + 360) % 360
-    const totalRotation = rotation + extraTurns * 360 + offsetToWinner
+    const totalRotation = rotation + turns * 360 + offsetToWinner
     const start = performance.now()
     const startRot = rotation
     const totalDelta = totalRotation - startRot
-    const durationMaxMs = 22000
+    const durationMaxMs = Math.max(8000, Math.min(60000, durationMs))
+    let lastProgressReportMs = 0
+    const PROGRESS_THROTTLE_MS = 50
+
+    // تحديث الـ transform مباشرة على الـ DOM (بدون setState) لتفادي re-renders كل إطار → مرونة على كل الأجهزة
+    const applyRotation = (deg: number) => {
+      const el = wheelRotateRef.current
+      if (el) el.style.transform = `translate3d(-50%, -50%, 0) rotate(${deg}deg)`
+    }
+
     // Cubic-Bezier(0.1, 0, 0, 1) — حركة فخمة (احتكاك/جاذبية)، العجلة بتهدي ببطء
     const run = (now: number) => {
+      if (spinCancelled.current) return
       const elapsed = now - start
       const tLinear = Math.min(1, elapsed / durationMaxMs)
       const progress = cubicBezierEaseOut(tLinear)
@@ -189,9 +255,14 @@ export function Wheel({
         sway = -0.5 * segmentAngle * inOut
       }
       const current = base + sway
-      setRotation(current)
+      applyRotation(current)
+
       const cb = onSpinProgressRef.current
-      if (cb) flushSync(() => cb(progress))
+      if (cb && (elapsed - lastProgressReportMs >= PROGRESS_THROTTLE_MS || progress >= 0.999)) {
+        lastProgressReportMs = elapsed
+        cb(progress)
+      }
+
       const segmentIndex = Math.floor((current - startRot) / segmentAngle)
       if (segmentIndex > lastTickedSegment.current) {
         lastTickedSegment.current = segmentIndex
@@ -199,10 +270,12 @@ export function Wheel({
       }
       const done = progress >= 0.999 || elapsed >= durationMaxMs
       if (!done) {
-        requestAnimationFrame(run)
+        spinRafId.current = requestAnimationFrame(run)
       } else {
-        const cb = onSpinProgressRef.current
-        if (cb) flushSync(() => cb(1))
+        spinRafId.current = null
+        if (spinCancelled.current) return
+        applyRotation(totalRotation)
+        if (cb) cb(1)
         setRotation(totalRotation)
         setSpinning(false)
         const finalIndex = getSegmentIndexAtTop(totalRotation)
@@ -210,7 +283,7 @@ export function Wheel({
         onSpinEnd({ id: prize.id, label: prize.label, percent: prize.percent })
       }
     }
-    requestAnimationFrame(run)
+    spinRafId.current = requestAnimationFrame(run)
   }
 
   const wheelSize = size + rimWidth * 2 + 16
@@ -218,17 +291,18 @@ export function Wheel({
 
   return (
     <div
-      className="w-full max-w-[432px] min-w-0 mx-auto px-0 py-2 sm:py-6 safe-area-pb"
+      className="w-full max-w-[432px] min-w-0 mx-auto px-0 py-2 sm:py-6 safe-area-pb overflow-x-hidden"
       style={{
         display: 'block',
         width: '100%',
+        maxWidth: '100%',
         direction: 'ltr',
         boxSizing: 'border-box',
       }}
     >
       {/* ١) العجلة فوق — دائماً أول عنصر */}
       <div
-        className="relative mx-auto w-full"
+        className="relative mx-auto w-full overflow-x-hidden"
         style={{ display: 'block', maxWidth: raysSize, marginLeft: 'auto', marginRight: 'auto' }}
       >
         <div className="relative shrink-0" style={{ width: raysSize, height: raysSize }}>
@@ -331,14 +405,16 @@ export function Wheel({
           />
 
           <div
+            ref={wheelRotateRef}
             className="absolute rounded-full overflow-hidden"
             style={{
               width: size - 8,
               height: size - 8,
               left: '50%',
               top: '50%',
-              transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+              transform: `translate3d(-50%, -50%, 0) rotate(${rotation}deg)`,
               transition: spinning ? 'none' : undefined,
+              ...(spinning ? { willChange: 'transform' as const } : {}),
             }}
           >
             <svg width={innerSize} height={innerSize} viewBox={`0 0 ${innerSize} ${innerSize}`}>
@@ -379,8 +455,8 @@ export function Wheel({
                       <tspan x={seg.textX} dy={0}>{seg.displayLabelLines[0]}</tspan>
                     ) : (
                       <>
-                        <tspan x={seg.textX} dy={-segmentFontSize * 0.45}>{seg.displayLabelLines[0]}</tspan>
-                        <tspan x={seg.textX} dy={segmentFontSize * 0.95}>{seg.displayLabelLines[1]}</tspan>
+                        <tspan x={seg.textX} dy={-segmentFontSize * 0.38}>{seg.displayLabelLines[0]}</tspan>
+                        <tspan x={seg.textX} dy={segmentFontSize * 0.88}>{seg.displayLabelLines[1]}</tspan>
                       </>
                     )}
                   </text>
@@ -459,7 +535,9 @@ export function Wheel({
               className="text-[0.75rem] sm:text-[0.8125rem] text-center leading-snug w-full px-2"
               style={{ color: '#5c5348', fontFamily: 'Tajawal, Cairo, sans-serif', maxWidth: '320px', boxSizing: 'border-box' }}
             >
-              لو كنت عضو إليت (فضي - ذهبي - بلاتيني) ابشر بسعدك.. مفاجأتنا بانتظارك!
+              {cooldownActive && typeof cooldownEndsAt === 'number'
+                ? `باقي لتدوير العجلة: ${formatCooldownRemaining(cooldownEndsAt)}`
+                : 'لو كنت عضو إليت (فضي - ذهبي - بلاتيني) ابشر بسعدك.. مفاجأتنا بانتظارك!'}
             </p>
           )}
           <button
@@ -470,7 +548,7 @@ export function Wheel({
                 ? (onSpinClick ?? handleSpin)
                 : (onSpinRequest ?? handleSpin)
             }
-            disabled={spinning || disabled}
+            disabled={spinning || disabled || cooldownActive}
             className={`w-full min-w-[200px] max-w-[280px] min-h-[44px] sm:min-h-[48px] py-2.5 sm:py-3.5 rounded-xl text-white font-bold active:scale-[0.99] transition-all disabled:opacity-40 disabled:pointer-events-none touch-manipulation text-[0.9375rem] sm:text-[1rem] leading-tight ${spinning ? 'animate-wheel-btn-pulse' : ''}`}
             style={{
               fontFamily: 'Tajawal, Cairo, sans-serif',
@@ -486,10 +564,29 @@ export function Wheel({
               ? (guestName?.trim()
                   ? `هديتك في الطريق يا ${guestName.trim()} ✨🎁`
                   : 'هديتك في الطريق ✨🎁')
-              : 'اضغط هنا'}
+              : cooldownActive
+                ? 'يمكنك التدوير بعد انتهاء المدة أعلاه'
+                : 'اضغط هنا'}
           </button>
+          {cooldownActive && onShowPreviousPrize && (
+            <button
+              type="button"
+              onClick={onShowPreviousPrize}
+              className="w-full min-w-[200px] max-w-[280px] min-h-[44px] py-2.5 rounded-xl text-[0.9375rem] font-bold active:scale-[0.99] transition-all touch-manipulation border-2"
+              style={{
+                fontFamily: 'Tajawal, Cairo, sans-serif',
+                color: '#2c2825',
+                borderColor: 'rgba(212, 175, 55, 0.7)',
+                background: 'rgba(255,255,255,0.6)',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                boxSizing: 'border-box',
+              }}
+            >
+              إرسال الجائزة للاستقبال مرة أخرى
+            </button>
+          )}
         </div>
-        {onSkipGift && !skipPhoneCheck && (
+        {onSkipGift && !skipPhoneCheck && !cooldownActive && (
           <div className="flex flex-col items-center gap-1.5 sm:gap-2 pt-1.5 sm:pt-2 border-t border-amber-900/20 w-full" style={{ minWidth: 0 }}>
             <p
               className="text-[0.7rem] sm:text-[0.8125rem] text-center leading-snug w-full px-2"

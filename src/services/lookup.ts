@@ -34,38 +34,42 @@ export function lookupGuest(phone: string): GuestLookup | null {
   const revenue = getRevenue()
   const settings = getSettings()
 
-  const totalSpent = revenue
+  const totalSpentFromRevenue = revenue
     .filter((r) => norm(r.phone) === p)
     .reduce((s, r) => s + (r.total_spent ?? 0), 0)
-  const points = Math.round(totalSpent / (settings.revenueToPoints || 1))
 
   let tier: Tier
   let name: string
   let idLastDigits: string | undefined
   let inTier = true
+  let memberSpent = 0
 
   const inPlatinum = platinum.find((r) => norm(r.phone) === p)
   if (inPlatinum) {
     tier = 'platinum'
     name = inPlatinum.name
     idLastDigits = inPlatinum.idLastDigits
+    memberSpent = inPlatinum.total_spent ?? 0
   } else {
     const inGold = gold.find((r) => norm(r.phone) === p)
     if (inGold) {
       tier = 'gold'
       name = inGold.name
       idLastDigits = inGold.idLastDigits
+      memberSpent = inGold.total_spent ?? 0
     } else {
       const inSilver = silver.find((r) => norm(r.phone) === p)
       if (inSilver) {
         tier = 'silver'
         name = inSilver.name
         idLastDigits = inSilver.idLastDigits
+        memberSpent = inSilver.total_spent ?? 0
       } else {
-        if (totalSpent <= 0) return null
+        if (totalSpentFromRevenue <= 0) return null
         inTier = false
+        const pointsForTier = Math.round(totalSpentFromRevenue / (settings.revenueToPoints || 1))
         tier = getEligibleTier(
-          points,
+          pointsForTier,
           settings.pointsSilverToGold ?? 10000,
           settings.pointsGoldToPlatinum ?? 12000
         )
@@ -73,6 +77,9 @@ export function lookupGuest(phone: string): GuestLookup | null {
       }
     }
   }
+
+  const totalSpent = totalSpentFromRevenue > 0 ? totalSpentFromRevenue : memberSpent
+  const points = Math.round(totalSpent / (settings.revenueToPoints || 1))
 
   const pointsToNextTier: number | null =
     tier === 'silver'

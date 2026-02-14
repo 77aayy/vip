@@ -29,11 +29,19 @@ export function getPendingPrize(): PendingPrize | null {
 }
 
 export function setPendingPrize(data: PendingPrize): void {
-  localStorage.setItem(PENDING_PRIZE_KEY, JSON.stringify(data))
+  try {
+    localStorage.setItem(PENDING_PRIZE_KEY, JSON.stringify(data))
+  } catch {
+    // quota / private mode
+  }
 }
 
 export function clearPendingPrize(): void {
-  localStorage.removeItem(PENDING_PRIZE_KEY)
+  try {
+    localStorage.removeItem(PENDING_PRIZE_KEY)
+  } catch {
+    // quota / private mode
+  }
 }
 
 export function getPendingExports(): PendingExport[] {
@@ -48,15 +56,27 @@ export function getPendingExports(): PendingExport[] {
 }
 
 export function addPendingExport(data: PendingExport): void {
-  const list = getPendingExports()
-  list.push(data)
-  localStorage.setItem(PENDING_EXPORTS_KEY, JSON.stringify(list))
+  try {
+    const list = getPendingExports()
+    list.push(data)
+    localStorage.setItem(PENDING_EXPORTS_KEY, JSON.stringify(list))
+  } catch {
+    // quota / private mode
+  }
 }
 
 export function setPendingExports(list: PendingExport[]): void {
-  localStorage.setItem(PENDING_EXPORTS_KEY, JSON.stringify(list))
+  try {
+    localStorage.setItem(PENDING_EXPORTS_KEY, JSON.stringify(list))
+  } catch {
+    // quota / private mode
+  }
 }
 
 export function clearPendingExports(): void {
-  localStorage.removeItem(PENDING_EXPORTS_KEY)
+  try {
+    localStorage.removeItem(PENDING_EXPORTS_KEY)
+  } catch {
+    // quota / private mode
+  }
 }

@@ -431,3 +431,120 @@ export function resolveRevenueToPhone(
   }
   return [...byPhone.entries()].map(([phone, total_spent]) => ({ phone, total_spent }))
 }
+
+/** سجل موجود (إيراد + اسم/هوية من القوائم) للدمج بمطابقة 100% */
+export interface ExistingRevenueRecord {
+  phone: string
+  name: string
+  idNumber: string
+  total_spent: number
+}
+
+/** نتيجة دمج التحديث — من تم دمجهم ومن تم تخطيهم */
+export interface MergeRevenueReport {
+  mergedCount: number
+  totalAddedAmount: number
+  skipped: Array<{
+    rowIndex: number
+    reason: 'no-name-or-id' | 'no-match' | 'multiple-matches'
+    name?: string
+    phoneOrId?: string
+    amount?: number
+  }>
+}
+
+/**
+ * دمج تحديث الإيراد بمطابقة 100% فقط: الاسم + (رقم الجوال أو رقم الهوية).
+ * لا يتم الدمج إلا إذا وُجد سجل واحد فقط مطابق. إن وُجد أكثر من واحد أو لا يوجد — يُتخطى الصف (لا دمج عشوائي).
+ * الملف يجب أن يحتوي عمود الاسم وعمود الجوال أو رقم الهوية.
+ */
+export function mergeRevenueUpdateWithStrictMatch(
+  existing: ExistingRevenueRecord[],
+  updateRows: RevenueParseRow[]
+): { merged: RevenueRow[]; report: MergeRevenueReport } {
+  const normPhone = (s: string) => (s || '').replace(/\D/g, '').slice(-9)
+  const normId = (s: string) => (s || '').replace(/\D/g, '').slice(-10)
+
+  const mergedByPhone = new Map<string, number>()
+  for (const e of existing) {
+    const p = normPhone(e.phone)
+    if (p.length >= 9) mergedByPhone.set(p, e.total_spent)
+  }
+
+  const report: MergeRevenueReport = {
+    mergedCount: 0,
+    totalAddedAmount: 0,
+    skipped: [],
+  }
+
+  for (let rowIndex = 0; rowIndex < updateRows.length; rowIndex++) {
+    const row = updateRows[rowIndex]!
+    const rowNameNorm = normalizeNameForMatch(row.name ?? '')
+    const rowPhone = row.phone ? normPhone(row.phone) : ''
+    const rowId = row.idNumber ? normId(row.idNumber) : ''
+
+    if (!rowNameNorm || rowNameNorm.length < 2) {
+      report.skipped.push({
+        rowIndex: rowIndex + 1,
+        reason: 'no-name-or-id',
+        name: (row.name ?? '').slice(0, 30),
+        phoneOrId: rowPhone || rowId || undefined,
+        amount: row.total_spent,
+      })
+      continue
+    }
+    if (rowPhone.length < 9 && rowId.length < 9) {
+      report.skipped.push({
+        rowIndex: rowIndex + 1,
+        reason: 'no-name-or-id',
+        name: (row.name ?? '').slice(0, 30),
+        amount: row.total_spent,
+      })
+      continue
+    }
+
+    const candidates = existing.filter((e) => {
+      const nameMatch = (e.name && normalizeNameForMatch(e.name) === rowNameNorm) ?? false
+      if (!nameMatch) return false
+      const phoneMatch = rowPhone.length >= 9 && normPhone(e.phone) === rowPhone
+      const idMatch = rowId.length >= 9 && e.idNumber && normId(e.idNumber) === rowId
+      return phoneMatch || idMatch
+    })
+
+    if (candidates.length === 0) {
+      report.skipped.push({
+        rowIndex: rowIndex + 1,
+        reason: 'no-match',
+        name: (row.name ?? '').slice(0, 30),
+        phoneOrId: rowPhone || rowId || undefined,
+        amount: row.total_spent,
+      })
+      continue
+    }
+    if (candidates.length > 1) {
+      report.skipped.push({
+        rowIndex: rowIndex + 1,
+        reason: 'multiple-matches',
+        name: (row.name ?? '').slice(0, 30),
+        phoneOrId: rowPhone || rowId || undefined,
+        amount: row.total_spent,
+      })
+      continue
+    }
+
+    const one = candidates[0]!
+    const phone = normPhone(one.phone)
+    if (phone.length >= 9) {
+      const current = mergedByPhone.get(phone) ?? 0
+      mergedByPhone.set(phone, current + row.total_spent)
+      report.mergedCount += 1
+      report.totalAddedAmount += row.total_spent
+    }
+  }
+
+  const merged: RevenueRow[] = [...mergedByPhone.entries()].map(([phone, total_spent]) => ({
+    phone,
+    total_spent,
+  }))
+  return { merged, report }
+}
