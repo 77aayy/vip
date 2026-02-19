@@ -8,6 +8,7 @@ function norm(s: string): string {
 
 /** بحث بالرقم — إن وُجد Firestore يُستخدم أولاً، وإلا localStorage. */
 export async function lookupGuestAsync(phone: string): Promise<GuestLookup | null> {
+  if (phone == null || typeof phone !== 'string' || !phone.trim()) return null
   if (isFirestoreAvailable()) {
     const fromFirestore = await getMemberByPhoneAsync(phone)
     if (fromFirestore) return fromFirestore
@@ -26,8 +27,9 @@ function getEligibleTier(
 }
 
 export function lookupGuest(phone: string): GuestLookup | null {
+  if (phone == null || typeof phone !== 'string') return null
   const p = norm(phone)
-  if (!p) return null
+  if (!p || p.length < 9) return null
   const platinum = getPlatinum()
   const gold = getGold()
   const silver = getSilver()

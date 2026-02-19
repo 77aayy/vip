@@ -1,6 +1,14 @@
 # سيناريوهات الاختبار الكامل (E2E) — عجلة الولاء
 
-تشغيل التطبيق: `npm run dev` ثم فتح العنوان المعروض (مثلاً http://localhost:5176).
+## تشغيل الاختبارات الآلية
+
+```bash
+npm run test:e2e
+```
+
+يشغّل Playwright على `http://localhost:5174` (يتطابق مع vite.config server port). التطبيق يُشغَّل تلقائياً إن لم يكن يعمل.
+
+تشغيل التطبيق يدوياً: `npm run dev` ثم فتح العنوان المعروض (مثلاً http://localhost:5174).
 
 ---
 
@@ -96,4 +104,10 @@
 - `btn-register-and-spin`: زر «انضم لنا الان .. وجرّب حظك!»
 - `btn-spin-wheel`: زر «دور العجلة» (للعميل المُعرّف)
 
-يمكن استخدامها في Playwright أو Puppeteer: `page.getByTestId('btn-skip-gift').click()`.
+يمكن استخدامها في Playwright: `page.getByTestId('btn-skip-gift').click()`.
+
+## الاختبارات الآلية (e2e/)
+
+| الملف | السيناريو |
+|-------|-----------|
+| `e2e/guest-lookup.spec.ts` | فتح /، إدخال رقم، ظهور زر استعلام؛ مسار التسجيل المجاني مع ظهور حقول الاسم والهوية |

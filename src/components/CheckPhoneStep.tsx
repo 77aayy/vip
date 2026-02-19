@@ -1,3 +1,5 @@
+import { trackUXEvent } from '@/services/analytics'
+import { NAME_MIN_LENGTH, NAME_MAX_LENGTH, ID_MIN_LENGTH, ID_MAX_LENGTH } from '@/constants/validation'
 import { useEffect, useRef, useState } from 'react'
 import type { GuestLookup } from '@/types'
 
@@ -65,16 +67,24 @@ export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, register
       setRecognizedGuest(null)
       return
     }
+    let cancelled = false
     setChecking(true)
     const t = setTimeout(async () => {
       try {
+        trackUXEvent('lookup_started')
         const found = await onLookup(p)
-        setRecognizedGuest(found)
+        if (!cancelled) setRecognizedGuest(found)
       } finally {
-        setChecking(false)
+        if (!cancelled) {
+          trackUXEvent('lookup_completed')
+          setChecking(false)
+        }
       }
     }, DEBOUNCE_MS)
-    return () => clearTimeout(t)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
   }, [p, onLookup])
 
   async function handleSubmit(e?: React.FormEvent) {
@@ -92,7 +102,7 @@ export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, register
       await onSubmit(p)
     } catch {
       submittedRef.current = false
-      setError('حدث خطأ. حاول مرة أخرى.')
+      setError('تعذّر الإجراء. تحقق من الاتصال وحاول مرة أخرى.')
     } finally {
       setLoading(false)
     }
@@ -109,14 +119,25 @@ export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, register
       setError('أدخل الاسم والهوية')
       return
     }
+    const nameLen = name.trim().length
+    const idLen = id.trim().length
+    if (nameLen < NAME_MIN_LENGTH || nameLen > NAME_MAX_LENGTH) {
+      setError('الاسم بين 2 و 100 حرف.')
+      return
+    }
+    if (idLen < ID_MIN_LENGTH || idLen > ID_MAX_LENGTH) {
+      setError('رقم الهوية بين 2 و 20 حرفاً.')
+      return
+    }
     if (!onRegisterAndSpin || registerSubmittedRef.current) return
     registerSubmittedRef.current = true
     setLoading(true)
+    trackUXEvent('register_started')
     try {
       await onRegisterAndSpin({ phone: p, name: name.trim(), id: id.trim() })
     } catch {
       registerSubmittedRef.current = false
-      setError('حدث خطأ. حاول مرة أخرى.')
+      setError('تعذّر الإجراء. تحقق من الاتصال وحاول مرة أخرى.')
     } finally {
       setLoading(false)
     }
@@ -225,6 +246,7 @@ export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, register
             type="tel"
             inputMode="numeric"
             placeholder="رقم الجوال"
+            data-testid="input-phone"
             value={phone}
             onChange={(e) => {
               const raw = e.target.value
@@ -286,7 +308,7 @@ export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, register
             </div>
           )}
           {error && (
-            <p className="text-red-600 text-[0.8125rem] text-center">{error}</p>
+            <p className="text-red-600 text-[0.8125rem] text-center" role="alert">{error}</p>
           )}
           {!showRegisterForm && (
             <button

@@ -9,8 +9,8 @@ npm install
 npm run dev
 ```
 
-- **صفحة الزبون:** `http://localhost:5173/`
-- **لوحة التحكم (الأدمن):** `http://localhost:5173/admin`
+- **صفحة الزبون:** `http://localhost:5174/`
+- **لوحة التحكم (الأدمن):** `http://localhost:5174/admin`
 
 ## ما تم تنفيذه
 
@@ -33,5 +33,12 @@ npm run dev
 - `src/services/storage.ts` — التخزين المؤقت
 - `src/services/lookup.ts` — البحث عن الضيف وحساب النقاط
 - `src/services/excelParser.ts` — قراءة ملفات Excel
-- `TASKS.md` — قائمة المهام
-- `PROJECT_SPEC.md` — المواصفات الكاملة
+- **`docs/`** — توثيق إضافي: `docs/README.md`، `docs/E2E_SCENARIOS.md`، `docs/FIREBASE_SECURITY.md`، `docs/WHEEL_SECURITY_AND_BACKEND.md`
+- **اختبارات الوحدة:** `npm run test`
+- **اختبارات E2E:** `npm run test:e2e` (Playwright)
+
+## قبل النشر
+
+- **تحقق تلقائي:** شغّل `npm run check` (بناء + اختبارات وحدة) — أمر واحد بدون خطوات إضافية.
+- **نشر كامل:** شغّل `deploy.bat` — ينفّذ التحقق ثم رفع GitHub ثم Firebase دون أوامر منفصلة.
+- إعداد لمرة واحدة (`.env`، كود الأدمن على السيرفر): راجع **`docs/DEPLOYMENT.md`**.

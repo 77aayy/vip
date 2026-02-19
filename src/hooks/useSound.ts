@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 export function useSound() {
   const audioContext = useRef<AudioContext | null>(null)
@@ -97,6 +97,12 @@ export function useSound() {
       tickIntervalId.current = null
     }
   }, [])
+
+  useEffect(() => {
+    return () => {
+      stopSpinningSound()
+    }
+  }, [stopSpinningSound])
 
   return { playWin, playTick, playSuccess, playCelebration, startSpinningSound, stopSpinningSound }
 }

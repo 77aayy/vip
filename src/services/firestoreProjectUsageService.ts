@@ -1,8 +1,12 @@
 /**
  * استدعاء Cloud Function لجلب استهلاك المشروع الحقيقي (قراءة/كتابة) من Monitoring API.
+ * مع كاش في الذاكرة (TTL 3 دقائق) لتقليل الطلبات.
  */
 import { getFirebaseApp } from '@/services/firebase'
 import { getFunctions, httpsCallable } from 'firebase/functions'
+
+const CACHE_TTL_MS = 3 * 60 * 1000
+let cache: { data: ProjectUsageResult; expiresAt: number } | null = null
 
 export interface ProjectUsageResult {
   ok: boolean
@@ -17,7 +21,11 @@ export interface ProjectUsageResult {
   error?: string
 }
 
-export async function getProjectUsageAsync(): Promise<ProjectUsageResult> {
+export function invalidateProjectUsageCache(): void {
+  cache = null
+}
+
+async function fetchProjectUsage(): Promise<ProjectUsageResult> {
   const app = getFirebaseApp()
   if (!app) {
     return {
@@ -49,4 +57,12 @@ export async function getProjectUsageAsync(): Promise<ProjectUsageResult> {
       error: message,
     }
   }
+}
+
+export async function getProjectUsageAsync(): Promise<ProjectUsageResult> {
+  const now = Date.now()
+  if (cache && cache.expiresAt > now) return cache.data
+  const data = await fetchProjectUsage()
+  cache = { data, expiresAt: now + CACHE_TTL_MS }
+  return data
 }

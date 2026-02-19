@@ -82,7 +82,7 @@ export function InstallBanner({ showAfterSpin = false }: InstallBannerProps) {
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-4 safe-area-pb"
+      className="fixed bottom-0 left-0 right-0 z-40 px-3 sm:px-4 pb-3 sm:pb-4 safe-area-pb"
       style={{
         paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))',
       }}

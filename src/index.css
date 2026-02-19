@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Mobile First: العرض الافتراضي للجوال، sm/md/lg للشاشات الأكبر ─── */
+
 * {
   -webkit-tap-highlight-color: transparent;
 }
@@ -11,6 +13,10 @@ html {
   overflow-x: hidden;
   width: 100%;
   max-width: 100vw;
+  /* الجوال أولاً: دعم viewport الديناميكي والأجهزة بنوتش */
+  min-height: 100dvh;
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
 }
 
 body {
@@ -19,29 +25,17 @@ body {
   color: #fafafa;
   width: 100%;
   max-width: 100vw;
+  min-height: 100dvh;
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
 }
 
 #root {
   width: 100%;
   max-width: 100vw;
   overflow-x: hidden;
-}
-
-/* موبايل: منع السكرول الأفقي — أولوية للعرض على الجوال */
-@media (max-width: 640px) {
-  html {
-    min-height: 100dvh;
-    min-height: -webkit-fill-available;
-  }
-  body {
-    min-height: 100dvh;
-    min-height: -webkit-fill-available;
-    overflow-x: hidden;
-  }
-  #root {
-    min-height: 100dvh;
-    overflow-x: hidden;
-  }
+  min-height: 100dvh;
+  min-height: 100vh;
 }
 
 .safe-area-pb {

@@ -94,6 +94,8 @@ export function Wheel({
   const wheelRotateRef = useRef<HTMLDivElement>(null)
   const spinRafId = useRef<number | null>(null)
   const spinCancelled = useRef(false)
+  const wheelAnimationRef = useRef<Animation | null>(null)
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   onSpinProgressRef.current = onSpinProgress
 
   const cooldownActive = typeof cooldownEndsAt === 'number' && cooldownEndsAt > 0 && cooldownEndsAt > now
@@ -106,6 +108,12 @@ export function Wheel({
         cancelAnimationFrame(spinRafId.current)
         spinRafId.current = null
       }
+      wheelAnimationRef.current?.cancel()
+      wheelAnimationRef.current = null
+      if (progressIntervalRef.current != null) {
+        clearInterval(progressIntervalRef.current)
+        progressIntervalRef.current = null
+      }
     }
   }, [])
 
@@ -115,10 +123,14 @@ export function Wheel({
     return () => clearInterval(t)
   }, [cooldownActive])
 
+  const triggerSpinCompletedRef = useRef<number>(0)
   useEffect(() => {
-    if (triggerSpin > 0 && triggerSpin !== lastTriggerSpin.current && !spinning) {
+    if (triggerSpin > 0 && triggerSpin !== lastTriggerSpin.current && !spinning && triggerSpin !== triggerSpinCompletedRef.current) {
       lastTriggerSpin.current = triggerSpin
       handleSpin()
+    }
+    return () => {
+      lastTriggerSpin.current = 0
     }
   }, [triggerSpin, spinning])
 
@@ -210,6 +222,8 @@ export function Wheel({
 
   function handleSpin() {
     if (spinning || disabled) return
+    const el = wheelRotateRef.current
+    if (!el) return
     const indices = availableIndices ?? prizes.map((_, i) => i)
     const canPick = indices.length > 0 ? indices : prizes.map((_, i) => i)
     setSpinning(true)
@@ -225,37 +239,39 @@ export function Wheel({
     const targetAngle = isRtl ? (360 - winnerMidAngle) % 360 : winnerMidAngle
     const offsetToWinner = (targetAngle - currentMod + 360) % 360
     const totalRotation = rotation + turns * 360 + offsetToWinner
-    const start = performance.now()
     const startRot = rotation
-    const totalDelta = totalRotation - startRot
     const durationMaxMs = Math.max(8000, Math.min(60000, durationMs))
-    let lastProgressReportMs = 0
     const PROGRESS_THROTTLE_MS = 50
 
-    // تحديث الـ transform مباشرة على الـ DOM (بدون setState) لتفادي re-renders كل إطار → مرونة على كل الأجهزة
-    const applyRotation = (deg: number) => {
-      const el = wheelRotateRef.current
-      if (el) el.style.transform = `translate3d(-50%, -50%, 0) rotate(${deg}deg)`
+    const tf = (deg: number) => `translate3d(-50%, -50%, 0) rotate(${deg}deg)`
+    const runAnim = () => {
+      if (spinCancelled.current || !wheelRotateRef.current) return
+      const target = wheelRotateRef.current
+      target.style.transform = tf(startRot)
+      const anim = target.animate(
+        [
+          { transform: tf(startRot) },
+          { transform: tf(totalRotation) },
+        ],
+        {
+          duration: durationMaxMs,
+          easing: 'cubic-bezier(0.1, 0, 0, 1)',
+          fill: 'forwards',
+        }
+      )
+      wheelAnimationRef.current = anim
+      progressIntervalRef.current = setInterval(tickProgress, 50)
     }
-
-    // Cubic-Bezier(0.1, 0, 0, 1) — حركة فخمة (احتكاك/جاذبية)، العجلة بتهدي ببطء
-    const run = (now: number) => {
-      if (spinCancelled.current) return
-      const elapsed = now - start
+    let lastProgressReportMs = 0
+    const tickProgress = () => {
+      if (spinCancelled.current || !wheelAnimationRef.current) return
+      const a = wheelAnimationRef.current
+      const ct = a.currentTime
+      if (ct == null || typeof ct !== 'number') return
+      const elapsed = Number(ct)
       const tLinear = Math.min(1, elapsed / durationMaxMs)
       const progress = cubicBezierEaseOut(tLinear)
-      const base = startRot + totalDelta * progress
-      const swayStart = 0.72
-      let sway: number
-      if (progress < swayStart || progress >= 1) {
-        sway = 0
-      } else {
-        const t = (progress - swayStart) / (1 - swayStart)
-        const inOut = Math.sin(Math.PI * t) * Math.sin(Math.PI * t)
-        sway = -0.5 * segmentAngle * inOut
-      }
-      const current = base + sway
-      applyRotation(current)
+      const current = startRot + (totalRotation - startRot) * progress
 
       const cb = onSpinProgressRef.current
       if (cb && (elapsed - lastProgressReportMs >= PROGRESS_THROTTLE_MS || progress >= 0.999)) {
@@ -268,22 +284,30 @@ export function Wheel({
         lastTickedSegment.current = segmentIndex
         playTick()
       }
-      const done = progress >= 0.999 || elapsed >= durationMaxMs
-      if (!done) {
-        spinRafId.current = requestAnimationFrame(run)
-      } else {
-        spinRafId.current = null
+    }
+
+    spinRafId.current = requestAnimationFrame(() => {
+      runAnim()
+      const a = wheelAnimationRef.current
+      if (!a) return
+      a.finished.then(() => {
         if (spinCancelled.current) return
-        applyRotation(totalRotation)
-        if (cb) cb(1)
+        triggerSpinCompletedRef.current = triggerSpin
+        if (progressIntervalRef.current != null) {
+          clearInterval(progressIntervalRef.current)
+          progressIntervalRef.current = null
+        }
+        wheelAnimationRef.current = null
+        a.cancel()
+        el.style.transform = tf(totalRotation)
+        onSpinProgressRef.current?.(1)
         setRotation(totalRotation)
         setSpinning(false)
         const finalIndex = getSegmentIndexAtTop(totalRotation)
         const prize = prizes[finalIndex]
         onSpinEnd({ id: prize.id, label: prize.label, percent: prize.percent })
-      }
-    }
-    spinRafId.current = requestAnimationFrame(run)
+      }).catch(() => { /* تجاهل إذا أُلغي */ })
+    })
   }
 
   const wheelSize = size + rimWidth * 2 + 16
@@ -406,6 +430,7 @@ export function Wheel({
 
           <div
             ref={wheelRotateRef}
+            data-testid="wheel-rotate"
             className="absolute rounded-full overflow-hidden"
             style={{
               width: size - 8,

@@ -14,7 +14,7 @@ export function WheelLoadingScreen({ onComplete }: WheelLoadingScreenProps) {
 
   return (
     <div
-      className="w-full max-w-sm mx-auto py-12 px-6 flex flex-col items-center justify-center min-h-[200px] rounded-2xl animate-fade-in"
+      className="w-full max-w-sm mx-auto py-10 sm:py-12 px-4 sm:px-6 flex flex-col items-center justify-center min-h-[180px] sm:min-h-[200px] rounded-2xl animate-fade-in"
       style={{
         background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,248,246,0.99) 100%)',
         border: '2px solid rgba(212, 175, 55, 0.45)',

@@ -3,6 +3,25 @@ const { MetricServiceClient } = require('@google-cloud/monitoring');
 
 const monitoring = new MetricServiceClient();
 
+/**
+ * تحقق كود الأدمن على السيرفر — الكود مخزّن في متغير بيئة ADMIN_CODE.
+ * للتفعيل: Firebase Console → Functions → Environment variables، أو
+ * firebase functions:config:set admin.code="كودك"
+ * ثم في الكود: functions.config().admin?.code
+ */
+exports.validateAdminToken = functions.region('us-central1').https.onCall(async (data, context) => {
+  const code = data?.code
+  if (typeof code !== 'string' || !code.trim()) {
+    return { valid: false, error: 'كود مطلوب' };
+  }
+  const expected = process.env.ADMIN_CODE || (functions.config().admin && functions.config().admin.code);
+  if (!expected || typeof expected !== 'string') {
+    return { valid: false, error: 'لم يُضبط كود الأدمن على السيرفر' };
+  }
+  const valid = code.trim() === expected.trim();
+  return { valid };
+});
+
 /** حصة Firestore المجانية اليومية (تقريبية) */
 const DAILY_READ_LIMIT = 50000;
 const DAILY_WRITE_LIMIT = 20000;

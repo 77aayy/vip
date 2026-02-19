@@ -14,7 +14,8 @@
 - **الملف:** `public/manifest.webmanifest` — اسم التطبيق، أيقونات، `display: standalone`, `orientation: portrait-primary`.
 - **الرابط في الصفحة:** `index.html` يحتوي على `<link rel="manifest" href="/manifest.webmanifest" />`.
 - **أبل:** `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `apple-touch-icon`, `apple-mobile-web-app-title`.
-- **Service Worker:** `public/sw.js` يُسجَّل في الإنتاج لتفعيل معيار "قابل للتثبيت" في المتصفح.
+- **Service Worker:** `public/sw.js` يُسجَّل في الإنتاج لتفعيل معيار "قابل للتثبيت" في المتصفح.
+- **تحديث الكاش:** عند كل إصدار جديد، حدّث `CACHE_NAME` في `public/sw.js` (مثلاً من `loyalty-wheel-v2` إلى `loyalty-wheel-v3`) حتى يُحذف الكاش القديم ويتحمّل المستخدمون أحدث الأصول.
 
 ### كيف يثبت المستخدم التطبيق
 

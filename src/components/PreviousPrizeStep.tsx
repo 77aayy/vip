@@ -33,7 +33,7 @@ function buildWhatsAppText(prizeLabel: string, code: string, name?: string, phon
 
 export function PreviousPrizeStep({ prizeLabel, code, guestName = '', guestPhone = '', guestId = '', onDone }: PreviousPrizeStepProps) {
   const settings = getSettings()
-  const whatsAppNumber = settings.whatsAppNumber.replace(/\D/g, '')
+  const whatsAppNumber = (settings.whatsAppNumber ?? '').replace(/\D/g, '')
 
   const handleSendWhatsApp = () => {
     const text = buildWhatsAppText(prizeLabel, code, guestName.trim() || undefined, guestPhone.trim() || undefined, guestId.trim() || undefined)
@@ -51,7 +51,7 @@ export function PreviousPrizeStep({ prizeLabel, code, guestName = '', guestPhone
   const mutedStyle = { color: '#5c5348', fontFamily: 'Tajawal, Cairo, sans-serif' }
 
   return (
-    <div className="w-full max-w-sm mx-auto py-6 animate-fade-in px-1">
+    <div className="w-full max-w-sm mx-auto py-4 sm:py-6 px-2 sm:px-1 animate-fade-in">
       <div className="rounded-2xl p-5 shadow-lg" style={cardStyle}>
         <p className="text-center text-[1rem] font-medium mb-1" style={textStyle}>
           {guestName.trim() ? `جائزتك السابقة يا ${guestName.trim()}` : 'جائزتك السابقة'}

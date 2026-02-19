@@ -3,6 +3,7 @@ node_modules/
 
 # Build
 dist/
+tsconfig.tsbuildinfo
 *.local
 
 # Environment (مفاتيح Firebase — لا ترفع أبداً)

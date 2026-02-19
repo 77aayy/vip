@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { trackUXEvent } from '@/services/analytics'
+import { NAME_MIN_LENGTH, NAME_MAX_LENGTH, ID_MIN_LENGTH, ID_MAX_LENGTH } from '@/constants/validation'
 import { appendVerificationSuffix } from '@/utils/whatsappMessage'
 import type { GuestLookup, Tier } from '@/types'
 
@@ -73,8 +75,10 @@ export function PhoneStep({
     if (submittedRef.current) return
     submittedRef.current = true
     setLoading(true)
+    trackUXEvent('lookup_started')
     try {
       const found = await onLookup(p)
+      trackUXEvent('lookup_completed')
       if (found) {
         setGuest(found)
         setStep('tier')
@@ -83,7 +87,8 @@ export function PhoneStep({
       }
     } catch {
       submittedRef.current = false
-      setError('حدث خطأ. حاول مرة أخرى.')
+      setError('تعذّر الإجراء. تحقق من الاتصال وحاول مرة أخرى.')
+      trackUXEvent('lookup_completed')
     } finally {
       setLoading(false)
     }
@@ -101,9 +106,20 @@ export function PhoneStep({
       setError('أدخل الاسم والهوية')
       return
     }
+    const nameLen = name.trim().length
+    const idLen = id.trim().length
+    if (nameLen < NAME_MIN_LENGTH || nameLen > NAME_MAX_LENGTH) {
+      setError('الاسم بين 2 و 100 حرف.')
+      return
+    }
+    if (idLen < ID_MIN_LENGTH || idLen > ID_MAX_LENGTH) {
+      setError('رقم الهوية بين 2 و 20 حرفاً.')
+      return
+    }
     if (submittedRef.current) return
     submittedRef.current = true
     setLoading(true)
+    trackUXEvent('register_started')
     try {
       await onRegister(
         { phone: p, name: name.trim(), id: id.trim() },
@@ -114,7 +130,7 @@ export function PhoneStep({
       onSuccess(p)
     } catch {
       submittedRef.current = false
-      setError('حدث خطأ. حاول مرة أخرى.')
+      setError('تعذّر الإجراء. تحقق من الاتصال وحاول مرة أخرى.')
     } finally {
       setLoading(false)
     }
@@ -189,7 +205,7 @@ export function PhoneStep({
                 رقم الجوال أرقام فقط بدون حروف
               </p>
             )}
-            {error && <p className="text-red-600 text-[0.8125rem] text-center">{error}</p>}
+            {error && <p className="text-red-600 text-[0.8125rem] text-center" role="alert">{error}</p>}
             <button type="submit" disabled={loading} className={btnGold} style={btnGoldStyle}>
               {loading ? '...' : 'متابعة'}
             </button>
@@ -247,8 +263,11 @@ export function PhoneStep({
   }
 
   if (step === 'register') {
-    const nameReady = name.trim().length >= 2
+    const nameLen = name.trim().length
+    const nameReady = nameLen >= NAME_MIN_LENGTH && nameLen <= NAME_MAX_LENGTH
     const phoneReady = phone.replace(/\D/g, '').slice(-9).length >= 9
+    const idLen = id.trim().length
+    const idReady = idLen >= ID_MIN_LENGTH && idLen <= ID_MAX_LENGTH
     return (
       <div className="w-full max-w-sm mx-auto py-6 animate-fade-in">
         <div className="rounded-2xl p-5 shadow-lg" style={cardStyle}>
@@ -310,10 +329,10 @@ export function PhoneStep({
                 <p className="text-center text-[0.75rem] px-1" style={{ color: '#8a8278' }}>بياناتك مشفرة ومؤمنة تماماً</p>
               </>
             )}
-            {error && <p className="text-red-600 text-[0.8125rem] text-center">{error}</p>}
+            {error && <p className="text-red-600 text-[0.8125rem] text-center" role="alert">{error}</p>}
             <button
               type="submit"
-              disabled={loading || !nameReady || !phoneReady || !id.trim()}
+              disabled={loading || !nameReady || !phoneReady || !idReady}
               className={btnGold}
               style={btnGoldStyle}
             >

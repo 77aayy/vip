@@ -1,14 +1,12 @@
 import { useState, FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { validateAdminCode, setAdminSession } from '@/services/adminAuth'
+import { validateAdminCodeAsync, setAdminSession } from '@/services/adminAuth'
 
 export function AdminLoginPage() {
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const navigate = useNavigate()
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
     const trimmed = code.trim()
@@ -17,25 +15,31 @@ export function AdminLoginPage() {
       return
     }
     setLoading(true)
-    if (validateAdminCode(trimmed)) {
-      setAdminSession()
-      navigate('/admin', { replace: true })
-      return
+    try {
+      const result = await validateAdminCodeAsync(trimmed)
+      if (result.valid) {
+        setAdminSession()
+        window.location.replace('/admin')
+        return
+      }
+      setError(result.error || 'كود الدخول غير صحيح')
+    } catch {
+      setError('حدث خطأ في الاتصال. تحقق من الشبكة وحاول مرة أخرى.')
+    } finally {
+      setLoading(false)
     }
-    setError('كود الدخول غير صحيح')
-    setLoading(false)
   }
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center p-4"
+      className="min-h-screen-dvh flex flex-col items-center justify-center p-4 sm:p-6"
       style={{
         background: 'linear-gradient(180deg, #0f0f0f 0%, #1a1a1a 50%, #0a0a0a 100%)',
         fontFamily: 'Tajawal, Cairo, sans-serif',
       }}
     >
       <div
-        className="w-full max-w-sm rounded-2xl p-6 sm:p-8 shadow-xl border border-white/10"
+        className="w-full max-w-[min(100%,400px)] rounded-2xl p-5 sm:p-8 shadow-xl border border-white/10"
         style={{
           background: 'linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
           backdropFilter: 'blur(12px)',
@@ -50,6 +54,7 @@ export function AdminLoginPage() {
             </label>
             <input
               id="admin-code"
+              data-testid="admin-code-input"
               type="password"
               inputMode="numeric"
               autoComplete="off"

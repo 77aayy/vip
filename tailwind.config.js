@@ -1,4 +1,5 @@
 /** @type {import('tailwindcss').Config} */
+/** Mobile First: الافتراضي للجوال، sm:640 md:768 lg:1024 xl:1280 للشاشات الأكبر */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {

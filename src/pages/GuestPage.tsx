@@ -15,13 +15,16 @@ import {
   recordSpinInFirestoreAsync,
 } from '@/services/firestoreLoyaltyService'
 import { exportNewGuest, flushPendingExports } from '@/services/guestExport'
+import { generateCode } from '@/services/codeUtils'
 import { getPendingPrize, setPendingPrize, clearPendingPrize } from '@/services/guestPending'
 import { getWheelSpun, getLastPrize, setWheelSpun, getCooldownEndsAt } from '@/services/wheelSpunStorage'
 import { checkSpinEligibility, recordSpinOnServer } from '@/services/spinEligibility'
+import { trackUXEvent } from '@/services/analytics'
 import { appendVerificationSuffix } from '@/utils/whatsappMessage'
 import type { GuestLookup, Prize } from '@/types'
 import { PreviousPrizeStep } from '@/components/PreviousPrizeStep'
 import { InstallBanner } from '@/components/InstallBanner'
+import { ModalFocusTrap } from '@/components/ModalFocusTrap'
 
 /** بنود الشروط والأحكام من الإعدادات (سطر = بند)، أو الافتراضي إن لم يُضبط */
 function getTermsItems(termsText: string | undefined): string[] {
@@ -49,20 +52,6 @@ function getTermsItems(termsText: string | undefined): string[] {
   ]
 }
 
-/** كود تحقق فريد — يستخدم crypto.getRandomValues لمقاومة التوقّع والتلاعب */
-function generateCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let s = ''
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const arr = new Uint32Array(8)
-    crypto.getRandomValues(arr)
-    for (let i = 0; i < 8; i++) s += chars[arr[i]! % chars.length]
-  } else {
-    for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)]
-  }
-  return s
-}
-
 export function GuestPage() {
   const [phase, setPhase] = useState<'wheel' | 'wheel-loading' | 'check-phone' | 'code' | 'phone' | 'previous-prize'>('wheel')
   const [previousPrizeData, setPreviousPrizeData] = useState<{ prizeLabel: string; code: string } | null>(null)
@@ -83,6 +72,7 @@ export function GuestPage() {
   const [spinProgress, setSpinProgress] = useState(0)
   const [termsOpen, setTermsOpen] = useState(false)
   const [cooldownEndsAt, setCooldownEndsAt] = useState<number | null>(null)
+  const [sendPendingError, setSendPendingError] = useState('')
   const currentSpinPhoneRef = useRef('')
   const { playWin, playSuccess } = useSound()
   const settings = getSettings()
@@ -115,6 +105,7 @@ export function GuestPage() {
   }, [availableIndices, settings.prizes])
 
   const handleSpinEnd = useCallback((prize: Prize) => {
+    trackUXEvent('spin_completed')
     setTargetWinnerIndex(null)
     setHasSpun(true)
     setTriggerSpinAt(0)
@@ -310,9 +301,15 @@ export function GuestPage() {
     const pending = getPendingPrize()
     if (!pending) return
     const settings = getSettings()
+    const waNum = settings.whatsAppNumber?.replace(/\D/g, '') ?? ''
+    if (!waNum || waNum.length < 9) {
+      setSendPendingError('لم يُضبط رقم واتساب في الإعدادات. الرجاء إضافته من لوحة التحكم.')
+      return
+    }
+    setSendPendingError('')
     const body = `🏨 طلب جائزة\n\n👤 الضيف: ${pending.name ?? 'ضيف'}\n📱 الجوال: ${pending.phone ?? '-'}\n🪪 رقم الهوية: ${pending.id ?? '-'}\n🏆 الفئة: -\n🎁 الجائزة: ${pending.prizeLabel}\n🔑 كود التحقق: ${pending.code}\n\nتم الإرسال من صفحة الضيف`
     const text = appendVerificationSuffix(body)
-    const url = `https://wa.me/${settings.whatsAppNumber.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`
+    const url = `https://wa.me/${waNum}?text=${encodeURIComponent(text)}`
     window.open(url, '_blank')
     clearPendingPrize()
     setPendingPrizeBanner(null)
@@ -337,11 +334,11 @@ export function GuestPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] flex flex-col overflow-x-hidden page-bg-leather sm:min-h-screen w-full max-w-[100vw]">
-      <main className="relative z-10 flex-1 flex flex-col items-center min-h-0 min-w-0 safe-area-insets pt-2 pb-6 px-2 sm:pt-6 sm:pb-10 sm:px-4 overflow-y-auto overflow-x-hidden w-full max-w-[100vw]">
+    <div className="min-h-[100dvh] flex flex-col overflow-x-hidden page-bg-leather w-full max-w-[100vw]">
+      <main className="relative z-10 flex-1 flex flex-col items-center min-h-0 min-w-0 safe-area-insets pt-2 pb-6 px-3 sm:pt-6 sm:pb-10 sm:px-4 overflow-y-auto overflow-x-hidden w-full max-w-[100vw]">
         <div className="w-full max-w-[432px] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl min-w-0 mx-auto flex flex-col items-center overflow-x-hidden">
-        <header className="fixed top-0 left-0 right-0 z-20 w-full max-w-[100vw] flex-shrink-0 overflow-x-hidden sm:relative sm:top-auto sm:left-auto sm:right-auto pt-2 pb-2 sm:pt-6 sm:pb-0 sm:-mt-6 sm:mb-6" style={{ background: '#d9c9a8' }}>
-          <div className="w-full max-w-[432px] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl min-w-0 mx-auto px-2 sm:px-4">
+        <header className="fixed top-0 left-0 right-0 z-20 w-full max-w-[100vw] flex-shrink-0 overflow-x-hidden sm:relative sm:top-auto sm:left-auto sm:right-auto pt-2 pb-2 sm:pt-6 sm:pb-0 sm:-mt-6 sm:mb-6 safe-area-insets" style={{ background: '#d9c9a8' }}>
+          <div className="w-full max-w-[432px] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl min-w-0 mx-auto px-3 sm:px-4">
           <div
             className="w-full flex flex-row items-center gap-2 sm:gap-3 py-2 sm:py-3.5 rounded-xl sm:rounded-2xl"
             dir="rtl"
@@ -445,6 +442,7 @@ export function GuestPage() {
               onClick={() => setTermsOpen(false)}
               aria-hidden
             />
+            <ModalFocusTrap active={termsOpen} onDeactivate={() => setTermsOpen(false)}>
             <div
               className="relative w-full max-h-[85vh] sm:max-h-[85vh] md:max-h-[90vh] max-w-[400px] sm:max-w-xl md:max-w-2xl lg:max-w-3xl rounded-t-2xl sm:rounded-2xl flex flex-col bg-white shadow-xl overflow-hidden"
               style={{
@@ -482,6 +480,7 @@ export function GuestPage() {
                 </ul>
               </div>
             </div>
+            </ModalFocusTrap>
           </div>
         )}
 
@@ -493,9 +492,16 @@ export function GuestPage() {
               border: '1px solid rgba(212,175,55,0.45)',
             }}
           >
-            <p className="text-[0.8125rem] font-medium" style={{ color: '#2c2825', fontFamily: 'Tajawal, Cairo, sans-serif' }}>
-              لديك جائزة معلقة — إرسال للاستقبال
-            </p>
+            <div className="flex-1 min-w-0">
+              <p className="text-[0.8125rem] font-medium" style={{ color: '#2c2825', fontFamily: 'Tajawal, Cairo, sans-serif' }}>
+                لديك جائزة معلقة — إرسال للاستقبال
+              </p>
+              {sendPendingError && (
+                <p className="text-red-600 text-[0.75rem] mt-1" role="alert">
+                  {sendPendingError}
+                </p>
+              )}
+            </div>
             <button
               type="button"
               onClick={handleSendPendingPrize}

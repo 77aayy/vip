@@ -1,41 +1,54 @@
 rules_version = '2';
 // قواعد أمان Firestore — عجلة الولاء
 // القراءة: مفتوحة (صفحة الضيف تحتاج قراءة الفئات والإيراد والإعدادات).
-// الكتابة: مفتوحة من التطبيق — حماية الأدمن تتم من واجهة التطبيق (صفحة دخول بكود).
-// للإنتاج القوي: فعّل Firebase Authentication وقيّد الكتابة بـ request.auth != null.
+// الكتابة: حالياً مفتوحة (canWrite = true) للإنتاج المحدود.
+// لتفعيل الحماية: استبدل "isAuthenticated() || true" بـ "isAuthenticated()" في الدالة canWrite وتفعيل Firebase Authentication.
+// للتفعيل: احذف "|| true" من كل قاعدة كتابة لربطها بـ isAuthenticated().
+// يتطلب تفعيل Firebase Authentication أولاً.
+function isAuthenticated() {
+  return request.auth != null;
+}
+// عند false = مفتوح للجميع؛ عند true = مقيد بـ isAuthenticated فقط
+// لأن Firestore لا يدعم متغيّرات وقت التشغيل، نستخدم: isAuthenticated() || true
+// للتفعيل: استبدل "isAuthenticated() || true" بـ "isAuthenticated()" في كل allow write
+function canWrite() {
+  return isAuthenticated() || true;
+}
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
     match /members_silver/{docId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if canWrite();
     }
     match /members_gold/{docId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if canWrite();
     }
     match /members_platinum/{docId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if canWrite();
     }
     match /revenue/{docId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if canWrite();
     }
     match /config/{docId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if canWrite();
     }
     match /new_members/{docId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if canWrite();
     }
     match /spin_eligibility/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if canWrite();
     }
     match /audit_log/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if canWrite();
     }
   }
 }

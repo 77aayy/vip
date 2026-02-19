@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { clearAdminSession } from '@/services/adminAuth'
 import { parseMemberFile, parseRevenueFile, mergeRevenueParseRows, parseMappingFile, mergeMappingResults, resolveRevenueToPhone, mergeRevenueUpdateWithStrictMatch, type MergeRevenueReport } from '@/services/excelParser'
 import {
@@ -45,11 +44,16 @@ import {
 import { getNewMembersLog, clearNewMembersLog } from '@/services/storage'
 import { exportBackupToExcel } from '@/services/exportBackup'
 import { appendAuditLogLocal, getAuditLogLocal, type AuditLogEntry } from '@/services/auditLogService'
-import { getUsage } from '@/services/firestoreUsageTracker'
-import { getProjectUsageAsync, type ProjectUsageResult } from '@/services/firestoreProjectUsageService'
-import { QRCodeSVG } from 'qrcode.react'
+import { getUsage, isNearLimit } from '@/services/firestoreUsageTracker'
+import { getProjectUsageAsync, invalidateProjectUsageCache, type ProjectUsageResult } from '@/services/firestoreProjectUsageService'
 import { defaultSettings } from '@/services/mockSettings'
+import { saveSettingsBackup, listSettingsBackups, restoreFromBackup, type BackupEntry } from '@/services/settingsBackup'
 import type { Prize, Settings } from '@/types'
+import { AdminStatsCards } from './admin/AdminStatsCards'
+import { AdminExcelFormat } from './admin/AdminExcelFormat'
+import { AdminQRPrint } from './admin/AdminQRPrint'
+import { MaskedSecretInput } from '@/components/MaskedSecretInput'
+import { ModalFocusTrap } from '@/components/ModalFocusTrap'
 
 type UploadKey = 'silver' | 'gold' | 'platinum' | 'revenue'
 
@@ -66,6 +70,8 @@ const ICONS: Record<UploadKey, string> = {
   platinum: '💎',
   revenue: '💰',
 }
+
+const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
 
 type UploadStep = 'reading' | 'uploading' | 'done'
 
@@ -224,7 +230,6 @@ export function AdminPage() {
     fileName: string
   } | null>(null)
   const [mergeApplyLoading, setMergeApplyLoading] = useState(false)
-  const [showAnalytics, setShowAnalytics] = useState(false)
   const [analyticsPrizeUsage, setAnalyticsPrizeUsage] = useState<Record<string, number> | null>(null)
 
   useEffect(() => {
@@ -295,12 +300,9 @@ export function AdminPage() {
   }, [loadNewMembersLog])
 
   useEffect(() => {
-    if (showAnalytics && useFirestore) {
-      getPrizeUsageAsync().then(setAnalyticsPrizeUsage)
-    } else if (!showAnalytics) {
-      setAnalyticsPrizeUsage(null)
-    }
-  }, [showAnalytics, useFirestore])
+    if (useFirestore) getPrizeUsageAsync().then(setAnalyticsPrizeUsage)
+    else setAnalyticsPrizeUsage(null)
+  }, [useFirestore])
 
   const loadAuditLog = useCallback(async () => {
     if (useFirestore) {
@@ -320,6 +322,8 @@ export function AdminPage() {
       setRevenue(merged)
       if (useFirestore) {
         await writeRevenueBatch(merged)
+        invalidateProjectUsageCache()
+        fetchProjectUsage()
         const c = await getCountsAsync()
         setCounts(c)
       } else {
@@ -337,11 +341,11 @@ export function AdminPage() {
       setMergePreview(null)
       setTimeout(() => setSuccess(''), 5000)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'فشل تطبيق الدمج')
+      setError(e instanceof Error ? e.message : 'تعذّر تطبيق الدمج. تحقق من الاتصال وحاول مرة أخرى.')
     } finally {
       setMergeApplyLoading(false)
     }
-  }, [mergePreview, useFirestore])
+  }, [mergePreview, useFirestore, fetchProjectUsage])
 
   const handleCancelMergePreview = useCallback(() => {
     setMergePreview(null)
@@ -389,26 +393,17 @@ export function AdminPage() {
     return list
   }, [newMembersLog, newMembersLogFilter, newMembersFilterDateFrom, newMembersFilterDateTo])
 
+  /** تحميل خفيف عند فتح صفحة الأدمن: إعدادات + أعداد فقط (بدون جلب كل الوثائق) — يقلل استهلاك Firestore كثيراً. القوائم الكاملة تُجلب عند الحاجة (تصدير، دمج إيراد، ربط). */
   useEffect(() => {
     if (!useFirestore) return
     let cancelled = false
-    Promise.all([
-      getSettingsAsync(),
-      getCountsAsync(),
-      getSilverRowsAsync(),
-      getGoldRowsAsync(),
-      getPlatinumRowsAsync(),
-      getRevenueRowsAsync(),
-    ]).then(([s, c, silver, gold, platinum, revenue]) => {
-      if (cancelled) return
-      setSettingsState(s)
-      setSettings(s)
-      setCounts(c)
-      setSilver(silver)
-      setGold(gold)
-      setPlatinum(platinum)
-      setRevenue(revenue)
-    })
+    Promise.all([getSettingsAsync(), getCountsAsync()])
+      .then(([s, c]) => {
+        if (cancelled) return
+        setSettingsState(s)
+        setSettings(s)
+        setCounts(c)
+      })
     return () => {
       cancelled = true
     }
@@ -423,6 +418,13 @@ export function AdminPage() {
     setLoading(key)
     setUploadStep('reading')
     setUploadCount(null)
+    if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+      setError('حجم الملف يتجاوز 10 ميجابايت. قلّل حجم الملف وحاول مرة أخرى.')
+      setLoading(null)
+      setUploadStep(null)
+      setUploadCount(null)
+      return
+    }
     try {
       let finalCount = 0
       let revenueParsedCount = 0
@@ -581,7 +583,11 @@ export function AdminPage() {
           revenueTierBreakdown,
         })
         appendAuditLogLocal({ action: 'upload', key, fileName: fileLabel, count: finalCount, at: Date.now() })
-        if (useFirestore) void addAuditLogAsync({ action: 'upload', key, fileName: fileLabel, count: finalCount })
+        if (useFirestore) {
+          void addAuditLogAsync({ action: 'upload', key, fileName: fileLabel, count: finalCount })
+          invalidateProjectUsageCache()
+          fetchProjectUsage()
+        }
       }
       if (firebaseCheck?.firestoreStatus === 'ok') setUsage(getUsage())
       setTimeout(() => {
@@ -591,12 +597,12 @@ export function AdminPage() {
         setUsage(getUsage())
       }, 1800)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'خطأ في قراءة الملف')
+      setError(e instanceof Error ? e.message : 'تعذّر قراءة الملف. تحقق من صحة الملف وحاول مرة أخرى.')
       setLoading(null)
       setUploadStep(null)
       setUploadCount(null)
     }
-  }, [useFirestore, revenueMergeMode, useRevenueNameLink, firebaseCheck?.firestoreStatus])
+  }, [useFirestore, revenueMergeMode, useRevenueNameLink, firebaseCheck?.firestoreStatus, fetchProjectUsage])
 
   const handleExportBackup = useCallback(async () => {
     setExportBackupLoading(true)
@@ -622,7 +628,7 @@ export function AdminPage() {
       setSuccess('تم تصدير النسخة الاحتياطية (ملف إكسل تم تنزيله)')
       setTimeout(() => setSuccess(''), 3000)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'فشل التصدير')
+      setError(e instanceof Error ? e.message : 'تعذّر التصدير. تحقق من الاتصال وحاول مرة أخرى.')
     } finally {
       setExportBackupLoading(false)
     }
@@ -656,17 +662,19 @@ export function AdminPage() {
     if (useFirestore) {
         try {
           await writeSettingsToFirestore(settings)
+          saveSettingsBackup(settings)
           setSuccess('تم حفظ الإعدادات (Firebase)')
           appendAuditLogLocal({ action: 'settings', at: Date.now() })
           void addAuditLogAsync({ action: 'settings' })
           setSaveSettingsStatus('success')
           setTimeout(() => setSaveSettingsStatus('idle'), 2500)
         } catch {
-        setError('فشل حفظ الإعدادات على Firebase')
+        setError('تعذّر حفظ الإعدادات. تحقق من الاتصال وحاول مرة أخرى.')
         setSaveSettingsStatus('error')
         setTimeout(() => setSaveSettingsStatus('idle'), 3000)
       }
     } else {
+      saveSettingsBackup(settings)
       setSuccess('تم حفظ الإعدادات')
       appendAuditLogLocal({ action: 'settings', at: Date.now() })
       setSaveSettingsStatus('success')
@@ -686,7 +694,7 @@ export function AdminPage() {
       loadNewMembersLog()
       setSuccess('تم مسح سجل العضويات الجديدة')
     } catch {
-      setError('فشل مسح السجل')
+      setError('تعذّر مسح السجل. تحقق من الاتصال وحاول مرة أخرى.')
     } finally {
       setClearingLog(false)
     }
@@ -718,17 +726,17 @@ export function AdminPage() {
     setTimeout(() => w.print(), 300)
   }, [filteredNewMembersLog, newMembersLogFilter, formatNewMemberDateTime])
 
-  const navigate = useNavigate()
   const handleLogout = useCallback(() => {
     clearAdminSession()
-    navigate('/admin', { replace: true })
-  }, [navigate])
+    window.location.replace('/admin')
+  }, [])
 
   return (
-    <div className="min-h-screen min-h-dvh bg-surface text-white font-arabic p-4 pb-8 safe-area-insets">
+    <div className="min-h-screen-dvh bg-surface text-white font-arabic pt-2 sm:pt-4 px-3 sm:px-4 pb-8 safe-area-insets overflow-x-hidden">
       {mergePreview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="merge-preview-title">
-          <div className="bg-surface-card border border-white/20 rounded-2xl p-6 max-w-md w-full shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm safe-area-insets" role="dialog" aria-modal="true" aria-labelledby="merge-preview-title">
+          <ModalFocusTrap active={!!mergePreview} onDeactivate={handleCancelMergePreview}>
+          <div className="bg-surface-card border border-white/20 rounded-2xl p-5 sm:p-6 max-w-md w-full max-h-[85dvh] overflow-y-auto shadow-xl">
             <h2 id="merge-preview-title" className="text-lg font-semibold text-white mb-3">معاينة الدمج</h2>
             <p className="text-white/80 text-sm mb-2">الملف: {mergePreview.fileName}</p>
             <ul className="text-white/90 text-sm space-y-1 mb-4">
@@ -756,36 +764,39 @@ export function AdminPage() {
               </button>
             </div>
           </div>
+          </ModalFocusTrap>
         </div>
       )}
-      <div className="max-w-2xl mx-auto min-w-0">
-        <header className="flex flex-col items-center mb-6">
-          <div className="flex items-center justify-between w-full gap-2 mb-2">
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="text-white/50 hover:text-white/80 text-sm font-medium"
-            >
-              تسجيل خروج
-            </button>
-            <div className="flex-1 min-w-0" />
-          </div>
-          <div className="bg-transparent inline-block">
-            <img
-              src="/logo-1.png"
-              alt="Elite"
-              className="h-20 w-auto max-w-[220px] object-contain object-center mb-2"
-              decoding="async"
-              style={{ background: 'transparent', mixBlendMode: 'multiply' }}
-            />
-          </div>
-          <h1 className="text-xl font-semibold text-white text-center">لوحة التحكم</h1>
+      <div className="max-w-2xl mx-auto min-w-0" data-testid="admin-dashboard">
+        <header className="flex items-center justify-between w-full gap-3 mb-3 sm:mb-4">
+          <img
+            src="/logo-1.png"
+            alt="Elite"
+            className="h-10 sm:h-12 w-auto max-w-[140px] object-contain object-center shrink-0"
+            decoding="async"
+            style={{ background: 'transparent', mixBlendMode: 'multiply' }}
+          />
+          <h1 className="text-lg sm:text-xl font-semibold text-white text-center flex-1 min-w-0">لوحة التحكم</h1>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="shrink-0 px-4 py-2 rounded-xl text-sm font-medium border border-white/25 bg-white/5 text-white/90 hover:bg-white/10 hover:border-white/40 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500/50"
+          >
+            تسجيل خروج
+          </button>
         </header>
+
+        <AdminStatsCards
+          useFirestore={useFirestore}
+          analyticsPrizeUsage={analyticsPrizeUsage}
+          newMembersLog={newMembersLog}
+          settings={settings}
+        />
 
         {/* فحص Firebase — رسالة واضحة مع سبب ومعالجة */}
         {firebaseCheck && (
           <div
-            className={`mb-6 p-4 rounded-2xl text-sm sm:text-base leading-relaxed ${
+            className={`mb-4 p-4 rounded-2xl text-sm sm:text-base leading-relaxed ${
               firebaseCheck.firestoreStatus === 'ok'
                 ? 'bg-green-500/20 text-green-200 border border-green-500/30'
                 : firebaseCheck.configOk
@@ -856,10 +867,20 @@ export function AdminPage() {
                           {!projectUsage.ok && projectUsage.error && (
                             <p className="text-amber-200/90 text-xs">تحذير: {projectUsage.error}</p>
                           )}
+                          {(projectUsage.readPercent >= 80 || projectUsage.writePercent >= 80) && (
+                            <p className="text-red-300 text-xs font-medium mt-2" role="alert">
+                              تنبيه: استهلاك Firestore قريب من الحصة اليومية. راجع Firebase Console.
+                            </p>
+                          )}
                         </>
                       )}
                     </div>
                     <p className="text-white/50 text-xs mt-3">استخدام هذا الجهاز فقط: قراءة {usage.reads.toLocaleString('ar')}، كتابة {usage.writes.toLocaleString('ar')}. يُصفَّر عند منتصف ليل Pacific.</p>
+                    {isNearLimit(80) && (
+                      <p className="text-red-300 text-xs font-medium mt-2" role="alert">
+                        تنبيه: استهلاك هذا المتصفح قريب من الحصة اليومية المقدرة.
+                      </p>
+                    )}
                     <a
                       href={`https://console.firebase.google.com/project/${firebaseCheck.projectId}/usage`}
                       target="_blank"
@@ -875,34 +896,7 @@ export function AdminPage() {
           </div>
         )}
 
-        {/* تعليمات تنسيق الإكسل — مطوية */}
-        <div className="mb-6 p-4 rounded-2xl bg-surface-card border border-white/[0.06] shadow-card">
-          <button
-            type="button"
-            onClick={() => setShowExcelFormat((v) => !v)}
-            className="w-full flex items-center gap-2 text-right"
-          >
-            <span
-              className={`inline-block transition-transform duration-200 ${showExcelFormat ? 'rotate-180' : ''}`}
-              aria-hidden
-            >
-              ▼
-            </span>
-            <h2 className="text-white font-semibold text-[0.9375rem] flex-1">📋 تنسيق ملف الإكسل</h2>
-          </button>
-          {showExcelFormat && (
-            <div className="mt-3 pt-3 border-t border-white/10">
-              <ul className="text-white/80 text-sm space-y-1.5 list-disc list-inside leading-relaxed">
-                <li>الصف الأول = عناوين الأعمدة (يُقرأ تلقائياً).</li>
-                <li><strong>قوائم الفضي/الذهبي/البلاتيني:</strong> مطلوب عمود جوال («جوال» أو «phone» أو «رقم» أو «mobile» أو «tel»). اختياري: «اسم»، «إيراد» أو «مبلغ»، «رقم الهوية».</li>
-                <li><strong>كشف الإيراد:</strong> يمكن رفع حتى 5 ملفات (واحد لكل فرع). مطلوب عمود جوال أو «رقم الهوية» + عمود «المدفوع» أو «الاجمالي». للربط: ارفع أولاً «رفع بيانات النزلاء» أو «ملف الربط» لربط صفوف الإيراد بأرقام الجوال. <strong>تحديث إيراد (دمج):</strong> فعّل «تحديث إيراد (دمج)» ثم ارفع ملفاً واحداً يحتوي <strong>الاسم</strong> + <strong>الجوال أو رقم الهوية</strong> + <strong>المبلغ المُضاف</strong> — يُدمج فقط عند مطابقة 100% (نفس الاسم ونفس الجوال أو الهوية).</li>
-                <li><strong>بيانات النزلاء:</strong> من قسم «ربط كشف الإيراد» — ارفع <strong>ملفاً واحداً أو حتى 50 ملف</strong>. النزلاء الجدد يُضافون إلى القائمة المحفوظة (لا استبدال). الملف: عمود <strong>رقم الجوال</strong> + <strong>رقم الهوية</strong> و/أو <strong>الاسم</strong>.</li>
-                <li>الرفع يستبدل القائمة الحالية (محلياً وعلى Firebase إن كان مفعّلاً).</li>
-              </ul>
-              <p className="text-white/60 text-xs mt-2">صيغ مقبولة: .xlsx, .xls, .csv — يُقرأ أول شيت فقط.</p>
-            </div>
-          )}
-        </div>
+        <AdminExcelFormat show={showExcelFormat} onToggle={() => setShowExcelFormat((v) => !v)} />
 
         {/* 4 upload icons + رفع بيانات النزلاء (لربط الإيراد بالجوال) */}
         <div className="grid grid-cols-2 gap-4 mb-4">
@@ -1006,57 +1000,6 @@ export function AdminPage() {
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
-        </div>
-
-        {/* تحليلات بسيطة */}
-        <div className="mb-6 rounded-2xl bg-surface-card border border-white/[0.06] overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setShowAnalytics((v) => !v)}
-            className="w-full flex items-center gap-2 p-4 text-right"
-          >
-            <span className={`inline-block transition-transform duration-200 ${showAnalytics ? 'rotate-180' : ''}`} aria-hidden>▼</span>
-            <h2 className="text-white font-semibold text-[0.9375rem] flex-1">تحليلات</h2>
-          </button>
-          {showAnalytics && (
-            <div className="px-4 pb-4 pt-0 border-t border-white/10 space-y-4">
-              {useFirestore && analyticsPrizeUsage === null ? (
-                <p className="text-white/50 text-sm">جاري تحميل التحليلات...</p>
-              ) : (
-              (() => {
-                const usage = useFirestore ? (analyticsPrizeUsage ?? getPrizeUsage()) : getPrizeUsage()
-                const totalSpins = Object.values(usage).reduce((a, b) => a + b, 0)
-                const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
-                const newMembersLast30 = newMembersLog.filter((e) => e.createdAt >= thirtyDaysAgo).length
-                return (
-                  <>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-                        <p className="text-white/50 text-xs mb-0.5">إجمالي الدورات</p>
-                        <p className="text-white font-semibold text-lg">{totalSpins.toLocaleString('ar-SA')}</p>
-                      </div>
-                      <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-                        <p className="text-white/50 text-xs mb-0.5">تسجيلات جديدة (آخر 30 يوم)</p>
-                        <p className="text-white font-semibold text-lg">{newMembersLast30.toLocaleString('ar-SA')}</p>
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-white/70 text-xs font-medium mb-2">استخدام الجوائز</p>
-                      <ul className="space-y-1.5 max-h-40 overflow-y-auto">
-                        {settings.prizes.map((p) => (
-                          <li key={p.id} className="flex justify-between items-center text-sm text-white/90">
-                            <span>{p.label}</span>
-                            <span className="font-medium">{(usage[p.id] ?? 0).toLocaleString('ar-SA')}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </>
-                )
-              })()
-              )}
             </div>
           )}
         </div>
@@ -1240,11 +1183,12 @@ export function AdminPage() {
           </div>
         )}
 
-        {error && <div className="mb-4 p-3 rounded-xl bg-red-500/20 text-red-200 text-sm">{error}</div>}
+        {error && <div className="mb-4 p-3 rounded-xl bg-red-500/20 text-red-200 text-sm" role="alert">{error}</div>}
         {success && <div className="mb-4 p-3 rounded-xl bg-green-500/20 text-green-200 text-sm">{success}</div>}
 
         {showClearLogConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="clear-log-title">
+            <ModalFocusTrap active={showClearLogConfirm} onDeactivate={() => setShowClearLogConfirm(false)}>
             <div className="bg-surface-card border border-white/20 rounded-2xl p-5 shadow-xl max-w-sm w-full">
               <p id="clear-log-title" className="text-white font-medium text-center mb-5">هل تريد حذف كل السجل ؟</p>
               <div className="flex gap-3 justify-center">
@@ -1267,6 +1211,7 @@ export function AdminPage() {
                 </button>
               </div>
             </div>
+            </ModalFocusTrap>
           </div>
         )}
 
@@ -1610,18 +1555,14 @@ export function AdminPage() {
             )}
           </div>
 
-          <div>
-            <label className="block text-white/70 text-sm mb-1">رقم واتساب الاستقبال (بدون +)</label>
-            <input
-              type="tel"
-              value={settings.whatsAppNumber ?? ''}
-              onChange={(e) =>
-                setSettingsState((s) => ({ ...s, whatsAppNumber: e.target.value.trim() }))
-              }
-              placeholder="966126076060"
-              className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40"
-            />
-          </div>
+          <MaskedSecretInput
+            label="رقم واتساب الاستقبال (بدون +)"
+            value={settings.whatsAppNumber ?? ''}
+            onChange={(v) => setSettingsState((s) => ({ ...s, whatsAppNumber: v }))}
+            placeholder="966126076060"
+            type="tel"
+            showLastChars={4}
+          />
 
           <div>
             <label className="block text-white/70 text-sm mb-1">رابط انستجرام (بعد النجاح: تابعنا للاطلاع على عروضنا)</label>
@@ -1636,18 +1577,23 @@ export function AdminPage() {
             />
           </div>
 
-          <div>
-            <label className="block text-white/70 text-sm mb-1">رابط التحقق من الأهلية (اختياري — العجلة لا تبدأ إلا بعد تأكيد السيرفر أن الرقم لم يلعب اليوم)</label>
-            <input
-              type="url"
-              value={settings.checkEligibilityUrl ?? ''}
-              onChange={(e) =>
-                setSettingsState((s) => ({ ...s, checkEligibilityUrl: e.target.value.trim() }))
-              }
-              placeholder="https://script.google.com/... أو Web App URL"
-              className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40"
-            />
-          </div>
+          <MaskedSecretInput
+            label="رابط ويب هوك لحفظ بيانات العضو الجديد (اختياري — Google Apps Script)"
+            value={settings.exportWebhookUrl ?? ''}
+            onChange={(v) => setSettingsState((s) => ({ ...s, exportWebhookUrl: v }))}
+            placeholder="https://script.google.com/... أو Web App URL"
+            type="url"
+            showLastChars={0}
+          />
+
+          <MaskedSecretInput
+            label="رابط التحقق من الأهلية (اختياري — العجلة لا تبدأ إلا بعد تأكيد السيرفر أن الرقم لم يلعب اليوم)"
+            value={settings.checkEligibilityUrl ?? ''}
+            onChange={(v) => setSettingsState((s) => ({ ...s, checkEligibilityUrl: v }))}
+            placeholder="https://script.google.com/... أو Web App URL"
+            type="url"
+            showLastChars={0}
+          />
 
           <div>
             <label className="block text-white/70 text-sm mb-1">مدة الحظر بين كل لفة وأخرى (يوم) — كل رقم يلعب مرة كل X يوم</label>
@@ -1845,103 +1791,49 @@ export function AdminPage() {
             {saveSettingsStatus === 'error' && 'فشل الحفظ'}
             {saveSettingsStatus === 'idle' && 'حفظ الإعدادات'}
           </button>
+
+          {(() => {
+            const backups = listSettingsBackups()
+            if (backups.length === 0) return null
+            return (
+              <div className="mt-4 pt-4 border-t border-white/10">
+                <p className="text-white/70 text-sm mb-2">استعادة من نسخة احتياطية:</p>
+                <ul className="space-y-2">
+                  {backups.map((entry: BackupEntry) => (
+                    <li key={entry.key} className="flex items-center justify-between gap-2">
+                      <span className="text-white/60 text-xs">
+                        {new Date(entry.timestamp).toLocaleString('ar-SA', { dateStyle: 'short', timeStyle: 'short' })}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const restored = restoreFromBackup(entry)
+                          setSettingsState(restored)
+                          setSettings(restored)
+                          if (useFirestore) void writeSettingsToFirestore(restored)
+                          setSuccess('تم استعادة النسخة الاحتياطية')
+                          setTimeout(() => setSuccess(''), 3000)
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-white/90 hover:bg-white/20"
+                      >
+                        استعادة
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })()}
           </div>
           )}
         </div>
 
         {/* QR للطباعة — لوحة للتعليق في النزل */}
-        <div className="mb-8 p-4 rounded-2xl bg-surface-card border border-white/[0.06] shadow-card">
-          <button
-            type="button"
-            onClick={() => setShowQRPrint((v) => !v)}
-            className="w-full flex items-center gap-2 text-right"
-          >
-            <span
-              className={`inline-block transition-transform duration-200 ${showQRPrint ? 'rotate-180' : ''}`}
-              aria-hidden
-            >
-              ▼
-            </span>
-            <h2 className="text-white font-semibold text-[0.9375rem] flex-1">📱 QR للطباعة — عجلة الحظ</h2>
-          </button>
-          {showQRPrint && (
-            <div className="mt-4 pt-4 border-t border-white/10">
-              <div
-                id="print-qr-card"
-                className="mx-auto max-w-[320px] bg-white rounded-2xl p-6 shadow-xl text-center print:max-w-full print:p-8"
-              >
-                <div className="mb-3 text-[#0a0a0a] font-bold text-xl tracking-wide">عجلة الحظ</div>
-                <p className="text-[#444] text-sm mb-4">امسح للعب وربح جوائز</p>
-                <div className="flex justify-center">
-                  <div className="inline-flex items-center justify-center p-4 rounded-xl bg-white border-2 border-[#14b8a6]/30" id="qr-container">
-                    <QRCodeSVG
-                      value={(() => {
-                        const pid = import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined
-                        return pid ? `https://${pid}.web.app/` : (typeof window !== 'undefined' ? `${window.location.origin}/` : '/')
-                      })()}
-                      size={180}
-                      level="H"
-                      includeMargin={false}
-                      fgColor="#0a0a0a"
-                      bgColor="#ffffff"
-                    />
-                  </div>
-                </div>
-                <p className="text-[#666] text-xs mt-4">امسح الكود لفتح صفحة العجلة</p>
-                <div className="mt-4 flex flex-row justify-center gap-3 print:hidden">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const svg = document.querySelector('#qr-container svg') as SVGSVGElement
-                      if (!svg) return
-                      const s = new XMLSerializer().serializeToString(svg)
-                      const blob = new Blob([s], { type: 'image/svg+xml;charset=utf-8' })
-                      const url = URL.createObjectURL(blob)
-                      const img = new Image()
-                      img.onload = () => {
-                        const c = document.createElement('canvas')
-                        c.width = img.width
-                        c.height = img.height
-                        const ctx = c.getContext('2d')
-                        if (ctx) {
-                          ctx.fillStyle = '#fff'
-                          ctx.fillRect(0, 0, c.width, c.height)
-                          ctx.drawImage(img, 0, 0)
-                          const a = document.createElement('a')
-                          a.href = c.toDataURL('image/png')
-                          a.download = 'qr-ajalat-alhaz.png'
-                          a.click()
-                        }
-                        URL.revokeObjectURL(url)
-                      }
-                      img.src = url
-                    }}
-                    className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition-colors shadow-card"
-                    title="تحميل"
-                  >
-                    <span className="text-xl" aria-hidden>⬇</span>
-                    <span className="text-xs">تحميل</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => window.print()}
-                    className="flex flex-col items-center gap-1 px-5 py-3 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition-colors shadow-card"
-                    title="طباعة A4"
-                  >
-                    <span className="text-xl" aria-hidden>🖨</span>
-                    <span className="text-xs">طباعة A4</span>
-                  </button>
-                </div>
-              </div>
-              <p className="text-white/50 text-xs mt-3 text-center">
-                الرابط ثابت — اطبع وعلّق في الاستقبال أو أي مكان
-              </p>
-            </div>
-          )}
-        </div>
+        <AdminQRPrint show={showQRPrint} onToggle={() => setShowQRPrint((v) => !v)} />
 
         <p className="text-center text-white/50 text-sm mt-6">
           <a href="/" className="text-accent underline" data-testid="link-to-guest">العودة لصفحة الزبون</a>
+          <span className="block mt-1 text-white/40 text-xs">إصدار التطبيق: {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '—'}</span>
         </p>
       </div>
 
@@ -1954,6 +1846,7 @@ export function AdminPage() {
           aria-modal="true"
           aria-labelledby="duplicate-report-title"
         >
+          <ModalFocusTrap active={!!duplicateReport} onDeactivate={() => setDuplicateReport(null)}>
           <div
             className="w-full max-w-[400px] max-h-[85dvh] overflow-hidden rounded-2xl bg-surface-card border border-white/10 shadow-xl flex flex-col animate-fade-in"
             onClick={(e) => e.stopPropagation()}
@@ -2067,6 +1960,7 @@ export function AdminPage() {
               </button>
             </div>
           </div>
+          </ModalFocusTrap>
         </div>
       )}
     </div>

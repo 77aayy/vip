@@ -87,7 +87,7 @@ export function CodeResult({ code, prizeLabel, guestName = '', onCopy: _onCopy, 
   const mutedStyle = { color: '#5c5348', fontFamily: 'Tajawal, Cairo, sans-serif' }
 
   return (
-    <div className="w-full max-w-sm mx-auto py-6 animate-fade-in">
+    <div className="w-full max-w-sm mx-auto py-4 sm:py-6 px-2 sm:px-0 animate-fade-in">
       <div className="relative rounded-2xl p-5 overflow-hidden animate-celebrate-pop" style={cardStyle}>
         <div
           className="absolute inset-0 opacity-25 rounded-2xl pointer-events-none"

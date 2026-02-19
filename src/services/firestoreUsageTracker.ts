@@ -28,7 +28,7 @@ function save(data: { date: string; reads: number; writes: number }): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(data))
   } catch {
-    // ignore
+    // quota / private mode — لا نعطل التطبيق
   }
 }
 
@@ -42,6 +42,14 @@ export function trackWrites(count: number): void {
   const d = getStored()
   d.writes += count
   save(d)
+}
+
+/** نسبة عتبة التحذير (مثلاً 80 = تحذير عند 80%) */
+export function isNearLimit(thresholdPercent = 80): boolean {
+  const d = getStored()
+  const readPct = (d.reads / READS_LIMIT) * 100
+  const writePct = (d.writes / WRITES_LIMIT) * 100
+  return readPct >= thresholdPercent || writePct >= thresholdPercent
 }
 
 export function getUsage(): {

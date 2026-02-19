@@ -10,11 +10,14 @@ import {
   getDocs,
   getCountFromServer,
   setDoc,
+  updateDoc,
   addDoc,
   deleteDoc,
   query,
+  where,
   orderBy,
   limit as limitFn,
+  increment as firestoreIncrement,
 } from 'firebase/firestore'
 import { firestoreDb } from './firebase'
 import { trackReads, trackWrites } from './firestoreUsageTracker'
@@ -32,6 +35,26 @@ const COL_NEW_MEMBERS = 'new_members'
 const COL_AUDIT = 'audit_log'
 const DOC_SETTINGS = 'settings'
 const DOC_PRIZE_USAGE = 'prize_usage'
+
+/** كاش إعدادات في الذاكرة (TTL 3 دقائق) — يقلل قراءات Firestore عند البحث بالرقم وصلاحية اللعب */
+const SETTINGS_CACHE_TTL_MS = 3 * 60 * 1000
+let settingsCache: { data: Settings; expiresAt: number } | null = null
+
+export function invalidateSettingsCache(): void {
+  settingsCache = null
+}
+
+/** كاش صلاحية اللعب لكل رقم (TTL 60 ثانية) — يقلل القراءات عند التكرار أو التحديث */
+const SPIN_ELIGIBILITY_CACHE_TTL_MS = 60 * 1000
+const spinEligibilityCache = new Map<
+  string,
+  { result: { allowed: boolean; cooldownEndsAt?: number; lastPrize?: { prizeLabel: string; code: string } }; expiresAt: number }
+>()
+
+function invalidateSpinEligibilityCache(phone: string): void {
+  const p = norm(phone)
+  if (p) spinEligibilityCache.delete(p)
+}
 
 export interface NewMemberLogEntry {
   id: string
@@ -247,29 +270,47 @@ export async function writeSettings(settings: Settings): Promise<void> {
   const ref = doc(firestoreDb, COL_CONFIG, DOC_SETTINGS)
   await setDoc(ref, settings)
   trackWrites(1)
+  invalidateSettingsCache()
 }
 
-/** جلب الإعدادات من Firestore. */
+/** جلب الإعدادات من Firestore (مع كاش TTL 3 دقائق لتقليل القراءات). */
 export async function getSettingsAsync(): Promise<Settings> {
   if (!firestoreDb) return defaultSettings
+  const now = Date.now()
+  if (settingsCache && settingsCache.expiresAt > now) return settingsCache.data
   const ref = doc(firestoreDb, COL_CONFIG, DOC_SETTINGS)
   const snap = await getDoc(ref)
   trackReads(1)
   if (!snap.exists()) return defaultSettings
   const data = snap.data() as Settings
-  return {
+  // دمج صحيح: حقول جديدة من Firestore تُحفظ عبر ...data؛ prizes و messages تُدمج يدوياً للحفاظ على البنية
+  const parsed: Settings = {
     ...defaultSettings,
     ...data,
     prizes: Array.isArray(data.prizes) ? data.prizes : defaultSettings.prizes,
     messages: { ...defaultSettings.messages, ...(data.messages ?? {}) },
   }
+  settingsCache = { data: parsed, expiresAt: now + SETTINGS_CACHE_TTL_MS }
+  return parsed
+}
+
+/** مُعرّفات بديلة للإيراد — للتعامل مع تنسيقات مختلفة (مثل 0531904476 vs 531904476). */
+function revenueDocIds(phone: string): string[] {
+  const digits = (phone || '').replace(/\D/g, '')
+  const p = norm(phone)
+  if (!p || p.length < 9) return []
+  const ids = [p]
+  if (digits.length === 10 && digits.startsWith('0')) ids.push(digits)
+  else if (digits.length >= 10) ids.push(digits.slice(-10))
+  return [...new Set(ids)]
 }
 
 /** البحث بالرقم في Firestore — فئة، نقاط، اسم. */
 export async function getMemberByPhoneAsync(phone: string): Promise<GuestLookup | null> {
   if (!firestoreDb) return null
+  if (phone == null || typeof phone !== 'string' || !phone.trim()) return null
   const p = norm(phone)
-  if (!p) return null
+  if (!p || p.length < 9) return null
 
   const settings = await getSettingsAsync()
 
@@ -284,6 +325,7 @@ export async function getMemberByPhoneAsync(phone: string): Promise<GuestLookup 
   let tier: Tier
   let name: string
   let idLastDigits: string | undefined
+  let memberSpent = 0
 
   let inTier = true
   if (platSnap.exists()) {
@@ -291,16 +333,19 @@ export async function getMemberByPhoneAsync(phone: string): Promise<GuestLookup 
     tier = 'platinum'
     name = (d.name as string) ?? ''
     idLastDigits = d.idLastDigits as string | undefined
+    memberSpent = (d.total_spent as number) ?? 0
   } else if (goldSnap.exists()) {
     const d = goldSnap.data()
     tier = 'gold'
     name = (d.name as string) ?? ''
     idLastDigits = d.idLastDigits as string | undefined
+    memberSpent = (d.total_spent as number) ?? 0
   } else if (silverSnap.exists()) {
     const d = silverSnap.data()
     tier = 'silver'
     name = (d.name as string) ?? ''
     idLastDigits = d.idLastDigits as string | undefined
+    memberSpent = (d.total_spent as number) ?? 0
   } else {
     const rev = revSnap.exists() ? (revSnap.data().total_spent as number) ?? 0 : 0
     if (rev <= 0) return null
@@ -313,8 +358,36 @@ export async function getMemberByPhoneAsync(phone: string): Promise<GuestLookup 
     name = ''
   }
 
-  const rev = revSnap.exists() ? (revSnap.data().total_spent as number) ?? 0 : 0
-  const points = Math.round(rev / (settings.revenueToPoints || 1))
+  let rev = revSnap.exists() ? (revSnap.data().total_spent as number) ?? 0 : 0
+  if (rev <= 0 && memberSpent <= 0) {
+    const altIds = revenueDocIds(phone).filter((id) => id !== p)
+    for (const altId of altIds) {
+      const altSnap = await getDoc(doc(firestoreDb, COL_REVENUE, altId))
+      trackReads(1)
+      if (altSnap.exists()) {
+        rev = (altSnap.data().total_spent as number) ?? 0
+        if (rev > 0) break
+      }
+    }
+    if (rev <= 0) {
+      const digits = (phone || '').replace(/\D/g, '')
+      const phoneVariants = [...new Set([p, digits].filter((s) => s && s.length >= 9))]
+      const colRef = collection(firestoreDb, COL_REVENUE)
+      const q = query(colRef, where('phone', 'in', phoneVariants.slice(0, 10)))
+      const qSnap = await getDocs(q)
+      trackReads(qSnap.size)
+      for (const d of qSnap.docs) {
+        const data = d.data()
+        const docPhone = (data.phone as string) ?? ''
+        if (norm(docPhone) === p) {
+          rev = (data.total_spent as number) ?? 0
+          if (rev > 0) break
+        }
+      }
+    }
+  }
+  const totalSpent = rev > 0 ? rev : memberSpent
+  const points = Math.round(totalSpent / (settings.revenueToPoints || 1))
 
   const pointsToNextTier: number | null =
     tier === 'silver'
@@ -338,7 +411,7 @@ export async function getMemberByPhoneAsync(phone: string): Promise<GuestLookup 
     pointsNextThreshold,
     ...(idLastDigits != null && idLastDigits !== '' && { idLastDigits }),
     inTier,
-    ...(rev > 0 && { totalSpent: rev }),
+    ...(totalSpent > 0 && { totalSpent }),
     ...(!inTier && { eligibleTier: tier }),
   }
 }
@@ -431,15 +504,21 @@ export async function getPrizeUsageAsync(): Promise<Record<string, number>> {
   return (data?.usage as Record<string, number>) ?? {}
 }
 
-/** زيادة عداد جائزة. */
+/** زيادة عداد جائزة (بدون قراءة عند وجود الوثيقة — يقلل استهلاك Firestore). */
 export async function incrementPrizeUsageAsync(prizeId: string): Promise<void> {
   if (!firestoreDb) return
   const ref = doc(firestoreDb, COL_CONFIG, DOC_PRIZE_USAGE)
-  const snap = await getDoc(ref)
-  trackReads(1)
-  const current = (snap.exists() ? (snap.data()?.usage as Record<string, number>) : {}) ?? {}
-  const next = { ...current, [prizeId]: (current[prizeId] ?? 0) + 1 }
-  await setDoc(ref, { usage: next })
+  try {
+    await updateDoc(ref, { [`usage.${prizeId}`]: firestoreIncrement(1) })
+  } catch (e: unknown) {
+    const err = e as { code?: string | number }
+    const isNotFound = err?.code === 'not-found' || err?.code === 5
+    if (isNotFound) {
+      await setDoc(ref, { usage: { [prizeId]: 1 } })
+    } else {
+      throw e
+    }
+  }
   trackWrites(1)
 }
 
@@ -594,7 +673,7 @@ export async function getAuditLogAsync(limit: number = 50): Promise<(AuditLogEnt
 const COL_SPIN_ELIGIBILITY = 'spin_eligibility'
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
-/** التحقق من صلاحية اللعب من Firestore (مصدر واحد عند عدم وجود checkEligibilityUrl). */
+/** التحقق من صلاحية اللعب من Firestore (مع كاش لكل رقم TTL 60 ثانية لتقليل القراءات). */
 export async function getSpinEligibilityAsync(phone: string): Promise<{
   allowed: boolean
   cooldownEndsAt?: number
@@ -603,29 +682,42 @@ export async function getSpinEligibilityAsync(phone: string): Promise<{
   if (!firestoreDb) return { allowed: true }
   const p = norm(phone)
   if (!p) return { allowed: true }
-  const [settingsSnap, spinSnap] = await Promise.all([
-    getDoc(doc(firestoreDb, COL_CONFIG, DOC_SETTINGS)),
+  const now = Date.now()
+  const cached = spinEligibilityCache.get(p)
+  if (cached && cached.expiresAt > now) return cached.result
+
+  const [settings, spinSnap] = await Promise.all([
+    getSettingsAsync(),
     getDoc(doc(firestoreDb, COL_SPIN_ELIGIBILITY, p)),
   ])
-  trackReads(2)
-  const settings = settingsSnap.exists() ? (settingsSnap.data() as Settings) : defaultSettings
+  trackReads(1)
   const cooldownDays = Math.max(1, Math.min(365, Math.floor(settings.spinCooldownDays ?? 15)))
   const cooldownMs = cooldownDays * MS_PER_DAY
-  if (!spinSnap.exists()) return { allowed: true }
+  if (!spinSnap.exists()) {
+    const result = { allowed: true }
+    spinEligibilityCache.set(p, { result, expiresAt: now + SPIN_ELIGIBILITY_CACHE_TTL_MS })
+    return result
+  }
   const data = spinSnap.data()
   const lastSpinAt = (data.lastSpinAt as number) ?? 0
   const endsAt = lastSpinAt + cooldownMs
-  if (Date.now() >= endsAt) return { allowed: true }
+  if (Date.now() >= endsAt) {
+    const result = { allowed: true }
+    spinEligibilityCache.set(p, { result, expiresAt: now + SPIN_ELIGIBILITY_CACHE_TTL_MS })
+    return result
+  }
   const prizeLabel = (data.prizeLabel as string) ?? ''
   const code = (data.code as string) ?? ''
-  return {
+  const result = {
     allowed: false,
     cooldownEndsAt: endsAt,
     ...(prizeLabel && code && { lastPrize: { prizeLabel, code } }),
   }
+  spinEligibilityCache.set(p, { result, expiresAt: now + SPIN_ELIGIBILITY_CACHE_TTL_MS })
+  return result
 }
 
-/** تسجيل لفة ناجحة في Firestore (مصدر واحد للصلاحية). */
+/** تسجيل لفة ناجحة في Firestore (مصدر واحد للصلاحية) — يبطّل كاش صلاحية هذا الرقم. */
 export async function recordSpinInFirestoreAsync(phone: string, prizeLabel: string, code: string): Promise<void> {
   if (!firestoreDb) return
   const p = norm(phone)
@@ -633,4 +725,5 @@ export async function recordSpinInFirestoreAsync(phone: string, prizeLabel: stri
   const ref = doc(firestoreDb, COL_SPIN_ELIGIBILITY, p)
   await setDoc(ref, { lastSpinAt: Date.now(), prizeLabel, code })
   trackWrites(1)
+  invalidateSpinEligibilityCache(phone)
 }

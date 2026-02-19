@@ -30,8 +30,10 @@ describe('adminAuth', () => {
 
   describe('validateAdminCode', () => {
     it('يقبل الكود الصحيح فقط', () => {
-      expect(validateAdminCode('ayman5255')).toBe(true)
-      expect(validateAdminCode('  ayman5255  ')).toBe(true)
+      const code = import.meta.env.VITE_ADMIN_CODE
+      expect(code).toBeTruthy()
+      expect(validateAdminCode(code)).toBe(true)
+      expect(validateAdminCode(`  ${code}  `)).toBe(true)
     })
     it('يرفض أي كود آخر', () => {
       expect(validateAdminCode('')).toBe(false)
