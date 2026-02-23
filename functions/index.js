@@ -1,34 +1,32 @@
-const functions = require('firebase-functions');
+const functions = require('firebase-functions/v1');
 const { MetricServiceClient } = require('@google-cloud/monitoring');
 
 const monitoring = new MetricServiceClient();
 
 /**
- * تحقق كود الأدمن على السيرفر — الكود مخزّن في متغير بيئة ADMIN_CODE.
- * للتفعيل: Firebase Console → Functions → Environment variables، أو
- * firebase functions:config:set admin.code="كودك"
- * ثم في الكود: functions.config().admin?.code
+ * Validate admin code on the server.
+ * Set ADMIN_CODE in Firebase Console: Project → Functions → Environment variables (1st Gen).
+ * Or: firebase functions:config:set admin.code="YOUR_CODE" then redeploy.
  */
 exports.validateAdminToken = functions.region('us-central1').https.onCall(async (data, context) => {
-  const code = data?.code
+  const code = data?.code;
   if (typeof code !== 'string' || !code.trim()) {
     return { valid: false, error: 'كود مطلوب' };
   }
   const expected = process.env.ADMIN_CODE || (functions.config().admin && functions.config().admin.code);
   if (!expected || typeof expected !== 'string') {
-    return { valid: false, error: 'لم يُضبط كود الأدمن على السيرفر' };
+    return { valid: false, error: 'لم يُضبط كود الأدمن على السيرفر (ADMIN_CODE)' };
   }
-  const valid = code.trim() === expected.trim();
+  const valid = code.trim() === String(expected).trim();
   return { valid };
 });
 
-/** حصة Firestore المجانية اليومية (تقريبية) */
+/** Firestore free tier daily limits (approximate) */
 const DAILY_READ_LIMIT = 50000;
 const DAILY_WRITE_LIMIT = 20000;
 
 /**
- * يجلب إجمالي قراءات وكتابات Firestore للمشروع خلال آخر 24 ساعة من Monitoring API.
- * Callable من الويب (صفحة الأدمن) — تحتاج صلاحية monitoring.timeSeries.list للـ Service Account.
+ * Get total Firestore reads/writes for the project in the last 24h from Monitoring API.
  */
 exports.getFirestoreUsage = functions.region('us-central1').https.onCall(async (data, context) => {
   const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
@@ -37,7 +35,7 @@ exports.getFirestoreUsage = functions.region('us-central1').https.onCall(async (
   }
 
   const now = Date.now() / 1000;
-  const startSec = now - 24 * 3600; // آخر 24 ساعة
+  const startSec = now - 24 * 3600;
   const interval = {
     startTime: { seconds: Math.floor(startSec) },
     endTime: { seconds: Math.floor(now) },

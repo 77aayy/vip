@@ -53,5 +53,21 @@ test.describe('عجلة الولاء — دوران فعلي', () => {
     // eslint-disable-next-line no-console
     console.log('WHEEL SPIN REPORT: initial=', initialTransform, 'later=', laterTransform, 'physicallySpun=', spun)
     expect(spun, 'العجلة يجب أن تدور فعلياً (تحول العنصر يتغير)').toBe(true)
+
+    // التحقق من عدم وجود سكرول في الصفحة (صفحة مدمجة على الجوال)
+    const scrollState = await page.evaluate(() => ({
+      htmlScrollTop: document.documentElement.scrollTop,
+      bodyScrollTop: document.body.scrollTop,
+      htmlOverflow: getComputedStyle(document.documentElement).overflowY,
+      bodyOverflow: getComputedStyle(document.body).overflowY,
+      rootOverflow: (() => {
+        const root = document.getElementById('root')
+        return root ? getComputedStyle(root).overflow : ''
+      })(),
+    }))
+    expect(scrollState.htmlScrollTop, 'صفحة الضيف: لا سكرول عمودي على html').toBe(0)
+    expect(scrollState.bodyScrollTop, 'صفحة الضيف: لا سكرول عمودي على body').toBe(0)
+    expect(scrollState.htmlOverflow, 'html يجب أن يكون overflow-y hidden على صفحة الضيف').toBe('hidden')
+    expect(scrollState.bodyOverflow, 'body يجب أن يكون overflow-y hidden على صفحة الضيف').toBe('hidden')
   })
 })

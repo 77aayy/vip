@@ -6,12 +6,16 @@ function norm(s: string): string {
   return s.replace(/\D/g, '').slice(-9)
 }
 
-/** بحث بالرقم — إن وُجد Firestore يُستخدم أولاً، وإلا localStorage. */
+/**
+ * بحث بالرقم — مصدر استقبال النزيل:
+ * - إن وُجد Firestore (مشروعك مُعدّ): القراءة من Firestore فقط (الفئة + النقاط)، لا رجوع للتخزين المحلي.
+ * - إن لم يُعدّ Firestore: القراءة من localStorage (للتطوير أو تشغيل دون Firebase).
+ */
 export async function lookupGuestAsync(phone: string): Promise<GuestLookup | null> {
   if (phone == null || typeof phone !== 'string' || !phone.trim()) return null
   if (isFirestoreAvailable()) {
     const fromFirestore = await getMemberByPhoneAsync(phone)
-    if (fromFirestore) return fromFirestore
+    return fromFirestore ?? null
   }
   return lookupGuest(phone)
 }

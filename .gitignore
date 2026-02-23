@@ -10,6 +10,9 @@ tsconfig.tsbuildinfo
 .env
 .env.local
 .env.*.local
+functions/.env
+functions/.env.*
+!functions/.env.example
 
 # Service account JSON (استخدم على السيرفر فقط — ممنوع في المشروع)
 *-service-account*.json
@@ -27,3 +30,11 @@ Thumbs.db
 # بيانات Excel (لا نرفعها على المستودع)
 *.xlsx
 *.xls
+
+# Playwright
+playwright-report/
+test-results/
+
+# تقارير مؤقتة
+lighthouse-report.json
+

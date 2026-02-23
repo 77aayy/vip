@@ -12,8 +12,9 @@
 - بعد تعديل `firestore.rules` في الجذر: `firebase deploy --only firestore`
 - الكتابة حالياً مفتوحة للإنتاج المحدود؛ لتفعيل الحماية راجع التعليقات في أعلى الملف.
 
-### Cloud Functions
-- كود الأدمن على السيرفر: ضبط المتغير `ADMIN_CODE` في بيئة الـ Functions (Firebase Console → Functions → Environment variables، أو `firebase functions:config:set admin.code="كودك"`).
+### Cloud Functions (1st gen — Node 22)
+- **كود الأدمن:** يُضبط عبر **Firebase Console → Functions → Environment variables** بإضافة `ADMIN_CODE`، أو من الطرفية: `firebase functions:config:set admin.code="كودك"` ثم إعادة نشر الدوال. الكود يقرأ من `process.env.ADMIN_CODE` أو `functions.config().admin.code`.
+- **ملف `functions/.env`:** لا يُرفع مع النشر؛ استخدمه للمحاكي المحلي فقط. للإنتاج استخدم لوحة Firebase أو `functions:config:set`.
 - إعادة نشر الـ Functions بعد تغيير الإعداد: `firebase deploy --only functions`
 
 ### متغيرات الويب (VITE_*)
@@ -32,9 +33,29 @@
 
 ## إعداد لمرة واحدة (قبل أول نشر)
 
-1. انسخ `.env.example` إلى `.env` واملأ قيم Firebase و `VITE_ADMIN_CODE`.
-2. ضبط كود الأدمن على السيرفر: Firebase Console → Functions → Environment variables → `ADMIN_CODE` (أو `firebase functions:config:set admin.code="كودك"` ثم `firebase deploy --only functions`).
-3. بعدها أي نشر لاحق = تشغيل `deploy.bat` فقط (أو `npm run check` ثم `firebase deploy` يدوياً إن رغبت).
+1. **ملف `.env` في جذر المشروع**  
+   الملف موجود ومُعبَّأ فيه `VITE_FIREBASE_PROJECT_ID` من مشروعك. افتح `.env` وأضف من **Firebase Console → Project Settings → General → Your apps (Web app)**:
+   - `VITE_FIREBASE_API_KEY`
+   - `VITE_FIREBASE_AUTH_DOMAIN`
+   - `VITE_FIREBASE_STORAGE_BUCKET`
+   - `VITE_FIREBASE_MESSAGING_SENDER_ID`
+   - `VITE_FIREBASE_APP_ID`  
+   ثم ضع **كود دخول لوحة التحكم** في `VITE_ADMIN_CODE=` (نفس الكود الذي ستضبطه على السيرفر في الخطوة 2).
+
+2. **كود الأدمن على السيرفر (Cloud Functions)**  
+   في **Firebase Console → Project → Functions → Environment variables (1st Gen)** أضف متغيراً:
+   - الاسم: `ADMIN_CODE`
+   - القيمة: كود الدخول الذي اخترته (نفس قيمة `VITE_ADMIN_CODE` في `.env`).  
+   أو من الطرفية:  
+   `firebase functions:config:set admin.code="كودك"`  
+   ثم أعد نشر الدوال: `firebase deploy --only functions`.
+
+3. بعد ذلك أي نشر = تشغيل **`deploy.bat`** فقط.
+
+## ضبط بيئة الدوال (ملخص حسب وثائق Firebase)
+- **مَعلمات (params):** مناسبة لـ 2nd gen، تُتحقق عند النشر، وتمنع النشر إن لم تُضبط القيم. نستخدم حالياً 1st gen فلا نستخدم params.
+- **متغيرات البيئة (.env):** نضع في `functions/.env` المفاتيح المطلوبة (مثل `ADMIN_CODE=...`). يُحمَّل الملف عند النشر. لمعلومات حسّاسة يُفضّل Secret Manager.
+- **أسرار (Secret Manager):** `firebase functions:secrets:set SECRET_NAME` ثم ربط السر بالدالة في الكود. للانتقال من `functions.config()` يُنصح بـ `firebase functions:config:export` ثم استخدام `defineJsonSecret` في 2nd gen.
 
 ## اختبار E2E (اختياري قبل النشر)
 

@@ -33,7 +33,7 @@ npm run dev
 - `src/services/storage.ts` — التخزين المؤقت
 - `src/services/lookup.ts` — البحث عن الضيف وحساب النقاط
 - `src/services/excelParser.ts` — قراءة ملفات Excel
-- **`docs/`** — توثيق إضافي: `docs/README.md`، `docs/E2E_SCENARIOS.md`، `docs/FIREBASE_SECURITY.md`، `docs/WHEEL_SECURITY_AND_BACKEND.md`
+- **`docs/`** — توثيق: `docs/README.md`، `docs/DEPLOYMENT.md`
 - **اختبارات الوحدة:** `npm run test`
 - **اختبارات E2E:** `npm run test:e2e` (Playwright)
 

@@ -7,12 +7,6 @@ function normalizePhone(v: unknown): string {
   return s.slice(-9)
 }
 
-function num(v: unknown): number {
-  if (v == null) return 0
-  const n = Number(v)
-  return Number.isFinite(n) ? n : 0
-}
-
 /** تحويل قيمة لمبلغ — يدعم الأرقام العربية والرموز والفاصلة العشرية */
 function parseAmount(v: unknown): number {
   if (v == null) return 0
@@ -111,8 +105,14 @@ export function parseMemberFile(file: File): Promise<ParseMemberResult> {
         const nameIdx = findColIndex(header, ['name', 'اسم', 'اسم العميل'])
         const spentIdx = findColIndex(header, ['total_spent', 'totalspent', 'spent', 'إيراد', 'ايراد', 'مبلغ'])
         const idIdx = findColIndex(header, ['id', 'هوية', 'رقم الهوية', 'identity', 'national_id'])
+        const idLast4Idx = findColIndexCellContains(header, ['آخر 4 هوية', 'آخر 4', 'أخر 4 هوية', 'أخر 4'])
         if (phoneIdx < 0) {
           return reject(new Error('عمود الجوال غير موجود. المطلوب: عمود بعنوان "جوال" أو "phone" أو "رقم" في الصف الأول.'))
+        }
+        /** تطبيع آخر 4 هوية إلى 4 أرقام (أصفار يساراً إن لزم) */
+        const toFourDigits = (s: string): string => {
+          const digits = s.replace(/\D/g, '').slice(-4)
+          return digits.length > 0 ? digits.padStart(4, '0') : ''
         }
         const out: MemberRow[] = []
         for (let i = 1; i < rows.length; i++) {
@@ -120,11 +120,19 @@ export function parseMemberFile(file: File): Promise<ParseMemberResult> {
           const phone = normalizePhone(row[phoneIdx])
           if (!phone) continue
           const idNum = idIdx >= 0 ? str(row[idIdx]).replace(/\D/g, '').slice(-10) : undefined
+          const idNumber = idNum && idNum.length >= 9 ? idNum : undefined
+          let idLastDigits: string | undefined
+          if (idLast4Idx >= 0) {
+            const fromCol = toFourDigits(str(row[idLast4Idx]))
+            if (fromCol) idLastDigits = fromCol
+          }
+          if (!idLastDigits && idNumber) idLastDigits = toFourDigits(idNumber)
           out.push({
             phone,
             name: nameIdx >= 0 ? str(row[nameIdx]) : '',
-            total_spent: spentIdx >= 0 ? num(row[spentIdx]) : 0,
-            ...(idNum && idNum.length >= 9 && { idNumber: idNum }),
+            total_spent: spentIdx >= 0 ? parseAmount(row[spentIdx]) : 0,
+            ...(idNumber && { idNumber }),
+            ...(idLastDigits && { idLastDigits }),
           })
         }
         if (out.length === 0) {

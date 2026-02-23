@@ -297,6 +297,16 @@ export function GuestPage() {
     }
   }, [])
 
+  /** صفحة الضيف: إضافة class على body و html لتعطيل أي سكرول وإخفاء الشريط */
+  useEffect(() => {
+    document.body.classList.add('guest-page')
+    document.documentElement.classList.add('guest-page')
+    return () => {
+      document.body.classList.remove('guest-page')
+      document.documentElement.classList.remove('guest-page')
+    }
+  }, [])
+
   const handleSendPendingPrize = useCallback(() => {
     const pending = getPendingPrize()
     if (!pending) return
@@ -334,9 +344,9 @@ export function GuestPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] flex flex-col overflow-x-hidden page-bg-leather w-full max-w-[100vw]">
-      <main className="relative z-10 flex-1 flex flex-col items-center min-h-0 min-w-0 safe-area-insets pt-2 pb-6 px-3 sm:pt-6 sm:pb-10 sm:px-4 overflow-y-auto overflow-x-hidden w-full max-w-[100vw]">
-        <div className="w-full max-w-[432px] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl min-w-0 mx-auto flex flex-col items-center overflow-x-hidden">
+    <div className="guest-page-viewport min-h-[100dvh] flex flex-col overflow-x-hidden overflow-y-hidden page-bg-leather w-full max-w-[100vw]">
+      <main className="relative z-10 flex flex-col items-center min-w-0 safe-area-insets pt-2 pb-6 px-3 sm:pt-6 sm:pb-10 sm:px-4 w-full max-w-[100vw] flex-1 min-h-0">
+        <div className="w-full max-w-[432px] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl min-w-0 mx-auto flex flex-col items-center overflow-x-hidden overflow-y-hidden">
         <header className="fixed top-0 left-0 right-0 z-20 w-full max-w-[100vw] flex-shrink-0 overflow-x-hidden sm:relative sm:top-auto sm:left-auto sm:right-auto pt-2 pb-2 sm:pt-6 sm:pb-0 sm:-mt-6 sm:mb-6 safe-area-insets" style={{ background: '#d9c9a8' }}>
           <div className="w-full max-w-[432px] sm:max-w-2xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl min-w-0 mx-auto px-3 sm:px-4">
           <div
@@ -521,7 +531,7 @@ export function GuestPage() {
         )}
 
         {phase === 'wheel' && !pendingPrizeBanner && (
-          <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden w-full">
+          <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden overflow-y-hidden w-full">
             {availableIndices.length === 0 && (
               <p className="text-center text-amber-800 bg-amber-100/90 rounded-xl px-3 py-2 sm:px-4 sm:py-3 w-full max-w-[432px] sm:max-w-2xl mx-auto mb-2 sm:mb-4 text-sm" data-testid="msg-no-prizes">
                 انتهت الجوائز المؤقتاً. الرجاء مراجعة الإعدادات من لوحة التحكم.

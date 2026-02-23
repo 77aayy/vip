@@ -326,12 +326,12 @@ export function Wheel({
     >
       {/* ١) العجلة فوق — دائماً أول عنصر */}
       <div
-        className="relative mx-auto w-full overflow-x-hidden"
+        className="relative mx-auto w-full overflow-hidden"
         style={{ display: 'block', maxWidth: raysSize, marginLeft: 'auto', marginRight: 'auto' }}
       >
         <div className="relative shrink-0" style={{ width: raysSize, height: raysSize }}>
         <div
-          className="wheel-glow relative rounded-full select-none touch-none p-2 sm:p-4 overflow-visible"
+          className="wheel-glow relative rounded-full select-none touch-none p-2 sm:p-4 overflow-hidden"
           style={{
             left: '50%',
             top: '50%',

@@ -9,6 +9,13 @@ const SHEET_GOLD = 'ذهبي'
 const SHEET_PLATINUM = 'بلاتيني'
 const SHEET_REVENUE = 'إيراد'
 
+/** تطبيع آخر 4 هوية لعرضها بأربعة أرقام (أصفار يساراً) */
+function formatIdLastFour(v: string | undefined | null): string {
+  if (v == null || v === '') return ''
+  const digits = String(v).replace(/\D/g, '').slice(-4)
+  return digits.length > 0 ? digits.padStart(4, '0') : ''
+}
+
 function memberToRows(rows: MemberRow[]): unknown[][] {
   if (rows.length === 0) return [['جوال', 'الاسم', 'الإيراد', 'آخر 4 هوية', 'رقم الهوية']]
   const header = ['جوال', 'الاسم', 'الإيراد', 'آخر 4 هوية', 'رقم الهوية']
@@ -16,7 +23,7 @@ function memberToRows(rows: MemberRow[]): unknown[][] {
     r.phone,
     r.name ?? '',
     r.total_spent ?? 0,
-    r.idLastDigits ?? '',
+    formatIdLastFour(r.idLastDigits),
     r.idNumber ?? '',
   ])
   return [header, ...data]

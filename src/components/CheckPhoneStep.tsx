@@ -175,10 +175,14 @@ export function CheckPhoneStep({ onSubmit, onLookup, onRegisterAndSpin, register
               </p>
               <p className="text-center text-[0.875rem] mb-1" style={mutedStyle}>
                 فئتك: <strong style={{ color: '#2c2825' }}>{tierLabel[recognizedGuest.tier] ?? recognizedGuest.tier}</strong>
-                {recognizedGuest.points != null && recognizedGuest.points >= 0 && (
-                  <> — نقاطك: <strong style={{ color: '#2c2825' }}>{recognizedGuest.points.toLocaleString('ar-SA')}</strong></>
-                )}
+                {' — نقاطك: '}
+                <strong style={{ color: '#2c2825' }}>{(recognizedGuest.points ?? 0).toLocaleString('ar-SA')}</strong>
               </p>
+              {(recognizedGuest.points ?? 0) === 0 && (
+                <p className="text-center text-[0.75rem] mb-1 text-amber-700/90" style={mutedStyle}>
+                  لظهور النقاط: ارفع كشف الإيراد من لوحة التحكم أو أضف عمود إيراد في ملف العضويات
+                </p>
+              )}
               {recognizedGuest.pointsToNextTier != null && recognizedGuest.pointsToNextTier > 0 && recognizedGuest.tier !== 'platinum' && (
                 <p className="text-center text-[0.8125rem] mb-1" style={mutedStyle}>
                   باقي <strong style={{ color: '#2c2825' }}>{recognizedGuest.pointsToNextTier.toLocaleString('ar-SA')}</strong> نقطة للوصول إلى{' '}

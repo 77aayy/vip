@@ -54,7 +54,7 @@ describe('lookupGuestAsync', () => {
     expect(await lookupGuestAsync('   ')).toBeNull()
   })
 
-  it('يستخدم Firestore عند توفره ثم يعود للـ localStorage', async () => {
+  it('يستخدم Firestore عند توفره فقط (استقبال النزيل من السحابة)', async () => {
     vi.mocked(firestoreLoyaltyService.isFirestoreAvailable).mockReturnValue(true)
     vi.mocked(firestoreLoyaltyService.getMemberByPhoneAsync).mockResolvedValue({
       phone: '501234567',
@@ -77,7 +77,7 @@ describe('lookupGuestAsync', () => {
     expect(firestoreLoyaltyService.getMemberByPhoneAsync).toHaveBeenCalledWith('0501234567')
   })
 
-  it('يعود للـ localStorage عند عدم وجود نتيجة في Firestore', async () => {
+  it('عند توفّر Firestore: عدم الرجوع للمحلي إن لم يُعثر على النزيل (استقبال من Firebase فقط)', async () => {
     vi.mocked(firestoreLoyaltyService.isFirestoreAvailable).mockReturnValue(true)
     vi.mocked(firestoreLoyaltyService.getMemberByPhoneAsync).mockResolvedValue(null)
     vi.mocked(storage.getSilver).mockReturnValue([
@@ -88,8 +88,6 @@ describe('lookupGuestAsync', () => {
     vi.mocked(storage.getRevenue).mockReturnValue([])
     vi.mocked(storage.getSettings).mockReturnValue(defaultSettings)
     const r = await lookupGuestAsync('0501234567')
-    expect(r).not.toBeNull()
-    expect(r!.tier).toBe('silver')
-    expect(r!.name).toBe('سارة')
+    expect(r).toBeNull()
   })
 })

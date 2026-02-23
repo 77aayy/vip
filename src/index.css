@@ -21,8 +21,8 @@ html {
 
 body {
   @apply font-arabic antialiased overflow-x-hidden;
-  background-color: #0a0a0a;
-  color: #fafafa;
+  background-color: #ffffff;
+  color: #0a0a0a;
   width: 100%;
   max-width: 100vw;
   min-height: 100dvh;
@@ -49,18 +49,10 @@ body {
   padding-right: env(safe-area-inset-right, 0);
 }
 
-body {
-  overscroll-behavior-y: none;
-}
-
-
-.min-h-screen-dvh {
-  min-height: 100vh;
-  min-height: 100dvh;
-}
-
-/* خلفية صفحة الضيف — لون بيج مع نقش أنعم شبيه بالجلد/الرق */
+/* منع rim/bounce على صفحة الضيف — لوحة الأدمن تبقى بتمرير طبيعي */
+/* خلفية صفحة الضيف — لون بيج مع نقش شبيه بالجلد */
 .page-bg-leather {
+  overscroll-behavior-y: none;
   background-color: #d9c9a8;
   position: relative;
 }
@@ -82,6 +74,58 @@ body {
   background-size: auto, 160px 160px;
   opacity: 0.26;
   mix-blend-mode: multiply;
+}
+
+/* صفحة الضيف فقط: لا سكرول ولا شريط تمرير — لا في الوضع الساكن ولا عند دوران العجلة */
+html.guest-page,
+body.guest-page {
+  overflow-y: hidden !important;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html.guest-page #root {
+  overflow: hidden !important;
+  height: 100dvh;
+  height: 100vh;
+}
+body.guest-page::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* صفحة الضيف: حاوية ثابتة بحجم الشاشة — مدمجة بدون أي سكرول (أولوية الجوال) */
+.guest-page-viewport {
+  position: fixed !important;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  height: 100vh;
+  max-height: 100dvh;
+  max-height: 100vh;
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+}
+
+/* لوحة الأدمن — تمرير مرن خاصة على الجوال */
+.admin-scroll-container {
+  scroll-behavior: smooth;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+
+.min-h-screen-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.max-h-screen-dvh {
+  max-height: 100vh;
+  max-height: 100dvh;
 }
 
 /* أولوية الجوال: منع التكبير التلقائي عند focus (iOS يكبّر لو font-size < 16px) */

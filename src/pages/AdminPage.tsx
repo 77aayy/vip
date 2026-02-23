@@ -732,7 +732,10 @@ export function AdminPage() {
   }, [])
 
   return (
-    <div className="min-h-screen-dvh bg-surface text-white font-arabic pt-2 sm:pt-4 px-3 sm:px-4 pb-8 safe-area-insets overflow-x-hidden">
+    <div
+        className="admin-scroll-container fixed inset-0 min-h-screen-dvh max-h-screen-dvh bg-surface text-white font-arabic pt-2 sm:pt-4 px-3 sm:px-4 pb-8 safe-area-insets overflow-x-hidden overflow-y-auto"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
       {mergePreview && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm safe-area-insets" role="dialog" aria-modal="true" aria-labelledby="merge-preview-title">
           <ModalFocusTrap active={!!mergePreview} onDeactivate={handleCancelMergePreview}>
@@ -1622,8 +1625,12 @@ export function AdminPage() {
                   max={60}
                   value={settings.wheelDurationSec ?? 22}
                   onChange={(e) => {
-                    const v = e.target.value === '' ? undefined : Math.max(8, Math.min(60, Math.floor(Number(e.target.value)) || 8))
-                    setSettingsState((s) => ({ ...s, wheelDurationSec: v ?? 22 }))
+                    const raw = e.target.value === '' ? undefined : Number(e.target.value)
+                    setSettingsState((s) => ({ ...s, wheelDurationSec: raw ?? 22 }))
+                  }}
+                  onBlur={(e) => {
+                    const v = e.target.value === '' ? 22 : Math.max(8, Math.min(60, Math.floor(Number(e.target.value)) || 22))
+                    setSettingsState((s) => ({ ...s, wheelDurationSec: v }))
                   }}
                   className="w-full max-w-[6rem] px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
                 />
@@ -1637,8 +1644,12 @@ export function AdminPage() {
                   max={10}
                   value={settings.wheelSpinCount ?? 3}
                   onChange={(e) => {
-                    const v = e.target.value === '' ? undefined : Math.max(2, Math.min(10, Math.floor(Number(e.target.value)) || 2))
-                    setSettingsState((s) => ({ ...s, wheelSpinCount: v ?? 3 }))
+                    const raw = e.target.value === '' ? undefined : Number(e.target.value)
+                    setSettingsState((s) => ({ ...s, wheelSpinCount: raw ?? 3 }))
+                  }}
+                  onBlur={(e) => {
+                    const v = e.target.value === '' ? 3 : Math.max(2, Math.min(10, Math.floor(Number(e.target.value)) || 3))
+                    setSettingsState((s) => ({ ...s, wheelSpinCount: v }))
                   }}
                   className="w-full max-w-[6rem] px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
                 />
@@ -1653,8 +1664,12 @@ export function AdminPage() {
                   step={0.5}
                   value={settings.delayBeforePrizeSec ?? 2.2}
                   onChange={(e) => {
-                    const v = e.target.value === '' ? undefined : Math.max(1, Math.min(6, Number(e.target.value) || 1))
-                    setSettingsState((s) => ({ ...s, delayBeforePrizeSec: v ?? 2.2 }))
+                    const raw = e.target.value === '' ? undefined : Number(e.target.value)
+                    setSettingsState((s) => ({ ...s, delayBeforePrizeSec: raw ?? 2.2 }))
+                  }}
+                  onBlur={(e) => {
+                    const v = e.target.value === '' ? 2.2 : Math.max(1, Math.min(6, Number(e.target.value) || 2.2))
+                    setSettingsState((s) => ({ ...s, delayBeforePrizeSec: v }))
                   }}
                   className="w-full max-w-[6rem] px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white"
                 />

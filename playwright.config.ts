@@ -35,7 +35,7 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev',
     url: 'http://localhost:5174',
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
     env: {
       ...process.env,
       VITE_ADMIN_CODE: adminCode,

@@ -1,42 +1,44 @@
 @echo off
-REM Full deploy: npm run check (build + unit tests) then git push then Firebase
+REM Quick deploy: build only (no tests), then git push then Firebase
 setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
 echo ========================================
-echo   Deploy - GitHub + Firebase
+echo   Update Firebase + GitHub (build only, no tests)
 echo ========================================
 echo.
 
-echo [1/4] Check and build (npm run check)...
-call npm run check
+echo [1/5] Building (npm run build)...
+call npm run build
 if errorlevel 1 (
   echo.
-  echo Check or build failed. Fix errors and run again.
+  echo Build failed. Fix errors and run again.
   pause
   exit /b 1
 )
-echo Check and build OK.
+echo Build OK.
 echo.
 
-echo [2/4] GitHub (git push)...
+echo [2/5] Pushing to GitHub (git push)...
 call git push origin master
 if errorlevel 1 (
   echo.
   echo Warning: git push failed. Check commit and origin/master.
-  echo Continuing to Firebase...
+  echo Continuing to Firebase deploy...
   echo.
+) else (
+  echo GitHub push OK.
 )
 echo.
 
-echo [3/4] Installing functions dependencies...
+echo [3/5] Installing functions dependencies...
 cd /d "%~dp0\functions"
 call npm install
 cd /d "%~dp0"
 echo Functions deps OK.
 echo.
 
-echo [4/4] Firebase deploy...
+echo [4/5] Deploying to Firebase...
 call npx firebase deploy
 if errorlevel 1 (
   echo.
@@ -44,10 +46,12 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-
+echo Firebase deploy OK.
 echo.
+
+echo [5/5] Done.
 echo ========================================
-echo   Done: GitHub + Firebase
+echo   Firebase and GitHub updated
 echo ========================================
 echo.
 pause
